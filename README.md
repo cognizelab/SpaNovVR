@@ -14,6 +14,7 @@ This repository contains the code our manuscript investigating gradients of spat
 ## Guide
 Here is a detailed guide to the code & files:
 
+- ***3D_hist_blender*** Blender files to create the 3D histograms.
 - ***anonymiser_script.R*** the script to anonumise the participant IDs.
 - ***data_combination_script.R*** the script to concatenate and prepare the data for further analysis.
 - ***SpaNov_event_file_creation_gradient.html*** & ***SpaNov_event_file_creation_gradient.html*** the script to create the event files for the analysis.
