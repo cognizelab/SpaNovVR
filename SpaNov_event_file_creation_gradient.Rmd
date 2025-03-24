@@ -1,0 +1,1054 @@
+---
+title: "Notebook for event file creation: for the gradient analysis (SpaNov)"
+author: "Joern Alexander Quent"
+date: "Analysis date: `r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# General notes
+This scripts creates the event files for the gradient analysis for the SpaNov paper. At the moment, this script only supports data where all trials are completed. This only creates the events for the gradient analysis for the 3, 4, 5 and 6 regressor variant.
+
+Here is some background how to combine to measure into one:
+
+- https://stats.stackexchange.com/questions/199085/how-to-create-a-pca-based-index-from-two-variables-when-their-directions-are-opp
+- https://stats.stackexchange.com/questions/140434/does-a-correlation-matrix-of-two-variables-always-have-the-same-eigenvectors
+
+```{r novelty_lvls}
+noveltyLvl <- c(3, 4, 5, 6)
+numLevels  <- length(noveltyLvl)
+```
+
+# Libraries used
+```{r libraries}
+# Install via devtools:install_github("JAQuent/assortedRFunctions", upgrade = "never")
+library(assortedRFunctions) 
+library(plyr)
+library(ggplot2)
+library(stringr)
+library(cowplot)
+library(foreach)
+library(doParallel)
+library(knitr)
+library(data.table)
+library(fmri)
+library(HH)
+library(reshape2)
+```
+
+<details>
+ <summary>Click here for detailed session information. </summary>
+```{r session_info}
+sessioninfo::session_info()
+```
+</details>
+
+# Data preparation
+
+<details>
+<summary>Click here for code for data preparation. </summary>
+```{r subject_info_and_path}
+# Path 2 where the data is saved
+path2data        <- "data/ignore_fMRI_version1/"
+lookupTable      <- read.csv(paste0(path2data, "lookUpTable.csv"))
+```
+
+```{r load_mainTask_data_7T}
+# Current task folder
+taskFolder <- paste0(path2data, "OLM_grassy/")
+
+# Load the subjects that are included in this analysis
+subjectFile  <- readLines(paste0(path2data, "SpaNov_subject2analyse.txt"))
+subjIDs    <- str_split(subjectFile, pattern = ",")[[1]] 
+
+# Create list of all files and load them
+allFiles   <- paste0(taskFolder, subjIDs, '/S007/trial_results.csv')
+trial_results <- do.call(rbind, lapply(allFiles, read.csv, quote = ""))
+
+# Remove rows with NA values
+#trial_results <- na.omit(trial_results)
+trial_results <- trial_results[!is.na(trial_results$runStartTime),]
+
+# Relabel ppid to subject to be compatible
+trial_results$subject <- trial_results$ppid
+
+# Get cue times
+cues_agg <- data.frame(ppid = trial_results$ppid,
+                       trial = trial_results$trial_num,
+                       start = trial_results$start_time,
+                       end = trial_results$start_time + trial_results$cue,
+                       duration = trial_results$cue,
+                       block_num = trial_results$block_num)
+# Get delay times
+delays_agg <- data.frame(ppid = trial_results$ppid,
+                         trial = trial_results$trial_num,
+                         start = trial_results$start_time + trial_results$cue,
+                         end = trial_results$start_time + trial_results$cue + trial_results$delay,
+                         duration = trial_results$delay,
+                         block_num = trial_results$block_num)
+```
+
+```{r load_positionData}
+# Current task folder
+taskFolder <- paste0(path2data, "OLM_grassy/")
+  
+# Loop through all subjects
+# Create empty list
+tempList <- list()
+
+# Loop through all subject folders
+for(i in 1:length(subjIDs)){
+  # Not this code will only work correctly if the folder only contains position tracker
+  # Get all files
+  path2tracker <- paste0(taskFolder, subjIDs[i], '/S007/trackers/') 
+  allTrackers  <- paste0(path2tracker, list.files(path2tracker))
+  
+  # Get list of DFs
+  tempTracker <- lapply(allTrackers, read.csv)
+  
+  # Add index as subject and then bind together
+  tempList[[i]] <- custom_rbinder_addIndexColumn(tempTracker, "trial")
+}
+
+# Bind this list to 1 DF with subject index
+positionData <- custom_rbinder_addIndexColumn(tempList, "subject")
+
+# Add ppid to the data frame
+## Get subject rle
+subject_rle <- rle(positionData$subject)
+
+# Add ppid to data frame
+positionData$ppid <- rep(subjIDs, times = subject_rle$lengths) # Repeat each R number in subjIDs according to the run length of subject
+# This works because the subjects are loaded in the order of subject_rle
+
+# Get how often the variables that will be added to the movement DF has to be repeated
+trial_rle <- rle(positionData$trial) # Get run length encoding so we know how often we need to repeat the trial type and other variables
+
+# Add the trial type to the position data
+positionData$trialType <- rep(trial_results$trialType, times = trial_rle$lengths) # Repeat trial type and add to position data
+```
+
+</details>
+
+## Folder & file naming convention
+The naming convention for the gradient analysis is: SpaNov_gradient_xlvl with x for the number of novelty/familiarity levels used in this analysis. The level of smoothing is additionally indicated by adding "_smo6" or "_smo2" add the end. Since the files created here are used with at least two different levels of smoothing, this was done by copying/rennaming the resulting folders.
+
+<details>
+ <summary>Code to create file & folder names </summary>
+```{r file_folder_names}
+# String parts
+task <- "OLM"
+
+# Other information
+folder    <- "ignore_eventTable3/"
+session   <- "S007"
+runs      <- c(1, 1, 2, 2) # OlMe run1, OLMr run 1, OLMe run 2 etc.
+runType   <- c("e", "r", "e", "r")
+
+# Create folders for this subject and for the session
+ses <- 1
+
+# Creating the subject folders
+OLMe_7T_SpaNovGradient1 <- paste0(folder, paste0("OLMe_7T_SpaNov_gradient_", rep(noveltyLvl, each = length(subjIDs)), "lvl/"), "sub-", rep(subjIDs, length(noveltyLvl)), "/ses-", sprintf("%02d", ses), "/") 
+OLMr_7T_SpaNovGradient1 <- paste0(folder, paste0("OLMr_7T_SpaNov_gradient_", rep(noveltyLvl, each = length(subjIDs)), "lvl/"), "sub-", rep(subjIDs, length(noveltyLvl)), "/ses-", sprintf("%02d", ses), "/") 
+```
+
+</details>
+
+# Downsample the data
+```{r downsample_param}
+# Parameter
+downsample_value  <- 0.2 #200 msec/0.2 sec
+```
+
+The position data that we have recorded is approximately 60 Hz. For the present analysis is unnecessarily high (for fMRI) increasing the computational load. We therefore downsample to approximately `r 1/downsample_value` Hz. 
+
+```{r downsample}
+# Add run information
+run_info <- ddply(trial_results, c("block_num", "trial_num"), summarise, N = length(ppid))
+positionData$run <- NA
+
+# Loop through all trials
+for(i in 1:nrow(run_info)){
+  positionData$run[positionData$trial == run_info$trial_num[i]] <- run_info$block_num[i]
+}
+
+startTime <- Sys.time()
+
+# Prepare the cluster for a parallel loop
+# Create the cluster following https://www.blasbenito.com/post/02_parallelizing_loops_with_r/
+if(Sys.info()[1] == 'Linux'){
+  my.cluster <- parallel::makeCluster(detectCores() - 2, type = "FORK")
+} else {
+  my.cluster <- parallel::makeCluster(detectCores() - 2, type = "PSOCK")
+}
+  
+# Register it to be used by %dopar%
+doParallel::registerDoParallel(cl = my.cluster)
+
+# Algorithm to down sample to a sample every x msec
+# For that loop through tempData_currentSubj and check if 200 msec have passed since current time
+# Each row where a new run begins is always included. After that only a sample that is 200 msec
+# passed the current time. Especially the first sample of a run is important to accurately
+# determine when the first image is recorded and that all the onsets correspond to that. 
+
+# Extract unique participants but in order in which they appear. This was verified
+# E.g. via positionData$ppid[!duplicated(positionData$ppid)]
+subjects <- unique(positionData$ppid)
+
+# Run parallel loop
+include <- foreach(i = 1:length(subjects), .combine = 'c') %dopar% {
+  # Subset to current subject
+  tempData_currentSubj <- positionData[positionData$ppid == subjects[i], ]
+  
+  # Create include variable
+  tempInclude <- rep(FALSE, nrow(tempData_currentSubj))
+  
+  # Loop through the each row
+  for(i in 1:nrow(tempData_currentSubj)){
+    # First time
+    if(i == 1){
+      currentTime <- tempData_currentSubj$time[i]
+      tempInclude[i]  <- TRUE
+    } else {
+      # Check if the last row was from a different run
+      if(tempData_currentSubj$run[i - 1] != tempData_currentSubj$run[i]){
+        # Set new time in this case
+        currentTime <- tempData_currentSubj$time[i]
+        tempInclude[i]  <- TRUE
+      } else {
+        # Check ih ith time is larger than currentTime + downsample_value
+        if(tempData_currentSubj$time[i] > currentTime + downsample_value){
+          # Set new time in this case
+          currentTime <- tempData_currentSubj$time[i]
+          tempInclude[i] <- TRUE
+        }
+      }
+    }
+  }
+  # Return
+  tempInclude
+}
+
+# Stop cluster again
+parallel::stopCluster(cl = my.cluster)
+
+endTime <- Sys.time()
+endTime - startTime
+
+
+# Apply downsampling to positionData
+positionData2 <- positionData[include,]
+
+
+# Check if there is no problem
+time_diff <- ddply(positionData2, c("ppid", "run", "trial"), summarise, 
+                   mean_time_diff = mean(diff(time)),
+                   sd_time_diff   = sd(diff(time)))
+# Now I manually checked the run start time of the first two participants
+```
+
+As a check, let's look at the average difference between data points, which is close to the `downsample_value` of `r downsample_value` with `r mean(time_diff$mean_time_diff)`. In other words, the new sampling rate is `r 1/mean(time_diff$mean_time_diff)` Hz
+
+# Calculate distances to objects
+To investigate possible differences between novelty/familiarity levels, we in additional calculate the distance between the current position in the time series to a) the target object of the trial and b) to the closest object (excluding the gift). Note: The code below only really works if the data is in correct order especially with regard to the trials, which was checked using `rle()`
+
+```{r calcDist2objects}
+# Add distance to target object as well as closest other object to position data
+## Function to calculate distance to the target object of the trial
+dist2targetFunction <- function(ppid, trial, pos_x, pos_z){
+  # Get target object location
+  object_x <- trial_results[trial_results$ppid == ppid & trial_results$trial_num == trial, "object_x"]
+  object_z <- trial_results[trial_results$ppid == ppid & trial_results$trial_num == trial, "object_z"]
+  
+  # Calculate distance
+  return(euclideanDistance3D(object_x, 1, object_z, pos_x, 1, pos_z))
+}
+
+## Get the location of all objects
+objLocations <- ddply(trial_results, c("targetNames"), summarise, 
+                      object_x_sd = sd(object_x),
+                      object_z_sd = sd(object_z),
+                      object_x = mean(object_x),
+                      object_z = mean(object_z))
+
+## Remove gift because it is irrelevant 
+objLocations <- objLocations[objLocations$targetNames != "Gift", ]
+
+## Function to calculate distance to the closet object
+dirst2closestFunction <- function(pos_x, pos_z){
+  # Create new variable
+  objLocations$currentDistance <- NA
+  
+  for(i in 1:nrow(objLocations)){
+    # Get the location of the object
+    object_x <- objLocations$object_x[i]
+    object_z <- objLocations$object_z[i]
+    objLocations$currentDistance[i] <- euclideanDistance3D(object_x, 1, object_z, pos_x, 1, pos_z)
+  }
+  
+  # Return the minimum distance
+  return(min(objLocations$currentDistance))
+ 
+}
+
+# Prepare the cluster for a parallel loop
+# Create the cluster following https://www.blasbenito.com/post/02_parallelizing_loops_with_r/
+if(Sys.info()[1] == 'Linux'){
+  my.cluster <- parallel::makeCluster(detectCores() - 2, type = "FORK")
+} else {
+  my.cluster <- parallel::makeCluster(detectCores() - 2, type = "PSOCK")
+}
+  
+# Register it to be used by %dopar%
+doParallel::registerDoParallel(cl = my.cluster)
+
+# Get unique subjects
+subjects <- unique(positionData2$ppid)
+
+# Run parallel loop 1
+dist2target <- foreach(i = 1:length(subjects), .combine = 'c', .packages = "assortedRFunctions") %dopar% {
+  # Subset data to one subject
+  subData <- positionData2[positionData2$ppid == subjects[i], ]
+  
+  # Temp var
+  tempVar <- rep(0, nrow(subData))
+  
+  # Loop through the subData
+  for(j in 1:nrow(subData)){
+    tempVar[j] <- dist2targetFunction(subData$ppid[j],
+                                      subData$trial[j],
+                                      subData$pos_x[j],
+                                      subData$pos_z[j])
+  }
+  
+  # Return tempVar
+  tempVar
+}
+
+# Run parallel loop 2
+dist2closet <- foreach(i = 1:length(subjects), .combine = 'c', .packages = "assortedRFunctions", .export = "objLocations") %dopar% {
+  # Subset data to one subject
+  subData <- positionData2[positionData2$ppid == subjects[i], ]
+  
+  # Temp var
+  tempVar <- rep(0, nrow(subData))
+  
+  # Loop through the subData
+  for(j in 1:nrow(subData)){
+    tempVar[j] <- dirst2closestFunction(subData$pos_x[j],
+                                        subData$pos_z[j])
+  }
+  
+  # Return tempVar
+  tempVar
+}
+
+# Stop cluster again
+parallel::stopCluster(cl = my.cluster)
+
+# Add the results back to the data frame
+positionData2$dist2target <- dist2target
+positionData2$dist2closet <- dist2closet
+```
+
+# Prepare the creation of event files by dividing the environment into sectors
+Note: The part below is a vestige of previous scripts where multiple sector sizes were used but here only sectoreSize = 10 is used.
+
+```{r sector_table}
+# Create the sector table
+sector_table <- data.frame(Name = "SpaNov_gradient",
+                           sectorSize = 10)
+
+# Display the table
+kable(sector_table)
+```
+
+Other parameters for this analysis:
+
+```{r fixed_param}
+minPeriodLength <- 0.5 # 500 msec
+limValues       <- c(-90,90)
+rotation_round  <- 2 # round rotation values to this decimal point
+```
+
+Before we can move to creating the events, we have to calculate in which sector a participant is for every time point. 
+
+```{r sector_envorionment}
+# Get the number of seeds of this analysis
+numSeeds <- sector_table$sectorSize[1] # Number of values per axis
+
+# Bin the environment
+x           <- positionData2$pos_x
+z           <- positionData2$pos_z
+
+startTime <- Sys.time()
+env_sectors <- voronoi_tessellation_grid_binning_2d(x, z,limValues, numSeeds, "hexagon", 
+                                                    useParallelisation  = TRUE)
+endTime <- Sys.time()
+endTime - startTime
+
+# Add result back to the df (sector2 is only for plotting)
+positionData2$sector  <- env_sectors
+positionData2$sector2 <- factor(env_sectors, levels = sample(unique(env_sectors)))
+```
+
+# Create the event files
+Finally, we move to create the events and then the event files for the gradient analysis. 
+
+```{r create_events}
+# Lists for extra information saved
+condition_info  <- list()
+event_file_list <- list()
+subj_list       <- list()
+
+# Convert moving to boolean
+positionData2$moving2 <- ifelse(positionData2$moving == "True", TRUE, FALSE)
+
+# Function to calculate locomotion states
+what_state <- function(rot_y, moving2){
+  # Get angles 
+  angle1 <- rot_y[2:length(rot_y)]
+  angle2 <- rot_y[1:(length(rot_y)-1)]
+  
+  # Calculate the amount was rotated between the time points and then rotate
+  rotated <- c(NA, round(angularDifference(angle1, angle2), rotation_round))
+  
+  # If rotation is zero called it stationary, otherwise rotation
+  tra_rot_sta <- ifelse(abs(rotated) == 0 | is.na(rotated), 'stationary', 'rotation') 
+  
+  # Set time point to translation based the information saved by unity
+  tra_rot_sta[moving2] <- 'translation'
+  
+  # Return
+  return(tra_rot_sta)
+}
+
+# Loop through all subjects
+for(subj in 1:length(subjIDs)){
+  ############ Prepare the data for division into periods ################
+  # Subset the data to the current subject
+  tempData <- positionData2[positionData2$ppid == subjIDs[subj], ]
+  
+  # Add include var
+  tempData$include <- TRUE
+  
+  # Remove cue & delay periods
+  trials <- unique(tempData$trial)
+  for(trial in 1:length(trials)){
+    # Calculate the time periods (on and offset) to exclude
+    onset  <- cues_agg[cues_agg$ppid == subjIDs[subj] & cues_agg$trial == trials[trial], "start"]
+    offset <- delays_agg[delays_agg$ppid == subjIDs[subj] & delays_agg$trial == trials[trial], "end"]
+    
+    # Exclude that time
+    tempData[tempData$trial == trials[trial] & 
+               tempData$time >= onset &
+               tempData$time <= offset, 'include'] <- FALSE
+  }
+  
+  # Apply the inclusion
+  tempData <- tempData[tempData$include, ]
+  
+  # Also exclude control time points
+  tempData <- tempData[tempData$trialType != "control", ]
+  
+  ############# Divide the data into periods ###############
+  # Run length encoding
+  sector_rle <- rle(tempData$sector)
+  
+  # Get periods
+  periods <- rep(1:length(sector_rle$lengths), times = sector_rle$lengths)
+  
+  # Feed back to the df
+  tempData$period <- periods
+
+  # Calculate the state for each time points for each subject and each trial
+  tempData <- ddply(tempData, c("ppid", "trial"), mutate, tra_rot_sta = what_state(rot_y, moving2))
+    
+  # Aggregate those periods
+  periods_agg <- ddply(tempData, c("run", "trial", "period", "sector"), summarise, 
+                       onset = min(time), 
+                       offset = max(time),
+                       duration = offset - onset,
+                       per_tra = mean(tra_rot_sta == "translation"),
+                       per_rot = mean(tra_rot_sta == "rotation"),
+                       per_sta = mean(tra_rot_sta == "stationary"),
+                       mean_dist2target = mean(dist2target),
+                       mean_dist2closet = mean(dist2closet))
+  
+  # Calculate duration of movement
+  periods_agg$dur_tra <- periods_agg$per_tra * periods_agg$duration
+  
+  # Remove periods that are too short
+  # For one participant, 143 rows are removed to give an idea how many 
+  periods_agg <- periods_agg[periods_agg$duration > minPeriodLength, ]
+  
+  ############ Calculate number of time visited & time since last visit ################
+  # Prepare vars
+  periods_agg$visits    <- 1
+  periods_agg$lastVisit <- NA
+  
+  # Loop through periods_agg to find how often this sector was visited and how long 
+  # ago the last visit was
+  for(rowID in 1:nrow(periods_agg)){
+    # The code only needs to run on the second row and later
+    if(rowID >= 2){
+      # Get the current index which is used to look back
+      index <- 1:(rowID - 1)
+      
+      # Current sector & subset to past periods
+      currentSector  <- periods_agg$sector[rowID]
+      pastPeriods <- periods_agg[index, ]
+      
+      # Check if same sector was was visited in the past (based on the index)
+      # To do this subset
+      pastPeriods_sameSector <- pastPeriods[pastPeriods$sector == currentSector, ]
+      
+      # Check if number of rows is larger than zero
+      if(nrow(pastPeriods_sameSector) > 0){
+        # Select the latest entry
+        pastPeriods_sameSector <- pastPeriods_sameSector[nrow(pastPeriods_sameSector), ]
+        
+        # Calculate the time difference between this and the last visit
+        timeDiff <- periods_agg$onset[rowID] - pastPeriods_sameSector$offset[1]
+        
+        # Update DF with the last time and all future times the sectors is
+        # visited with the new number
+        periods_agg$lastVisit[rowID] <- timeDiff
+        boolIndex <- (1:nrow(periods_agg) %in% rowID:nrow(periods_agg)) & periods_agg$sector == currentSector
+        periods_agg$visits[boolIndex] <- periods_agg$visits[boolIndex] + 1
+      }
+    }
+  }
+  
+  # Construct the novelty score
+  #periods_agg <- ddply(periods_agg, c("run"), mutate, noveltyScore = as.numeric(-scale(visits) + scale(lastVisit))/2)
+  periods_agg$noveltyScore <- as.numeric(-scale(periods_agg$visits) + scale(periods_agg$lastVisit))/2
+  
+  # Save periods_agg in list
+  subj_list[[subj]] <- periods_agg
+  
+  ############# Create EV files ###############
+  # For this, loop through the the number of levels and runs
+  for(lvl in 1:numLevels){
+    for(run in 1:length(runs)){
+      # Create labels for novelty
+      curr_numLvl     <- noveltyLvl[lvl]
+      curr_noveltyLvl <- paste0("lvl", 1:curr_numLvl)
+      curr_novelNums  <- curr_numLvl:1 # Reversed direction as needed by
+      # the quantiles
+      
+      # Subset to current run
+      tempData <- periods_agg[periods_agg$run == run, ]
+        
+      # Split into novelty events
+      visits             <- tempData$visits
+      lastVisit          <- tempData$lastVisit
+      noveltyScore       <- tempData$noveltyScore
+      quant_lastVisit    <- quantile(lastVisit, na.rm = TRUE, probs = 1:(curr_numLvl - 1)/curr_numLvl)
+      quant_noveltyScore <- quantile(noveltyScore, na.rm = TRUE, probs = 1:(curr_numLvl - 1)/curr_numLvl)
+      
+      # Classify based on the quantiles
+      lastVisit_gradientLevel     <- rep(NA, nrow(tempData))
+      noveltyScore_gradientLevel  <- rep(NA, nrow(tempData)) 
+      for(i in 1:curr_numLvl){
+        if(i == 1){
+          # Get index
+          ind1  <- curr_novelNums[1] - 1
+          
+          # Last visits
+          bool_index <- !is.na(lastVisit) & lastVisit > quant_lastVisit[ind1]
+          lastVisit_gradientLevel[bool_index]    <- curr_noveltyLvl[1]
+          
+          # Novelty score
+          bool_index <- !is.na(noveltyScore) & noveltyScore > quant_noveltyScore[ind1]
+          noveltyScore_gradientLevel[bool_index] <- curr_noveltyLvl[1]
+        } else if(i == curr_numLvl){
+          # Get index
+          ind1       <- curr_novelNums[curr_numLvl]
+          
+          # Last visits
+          bool_index <- !is.na(lastVisit) & lastVisit <= quant_lastVisit[ind1]
+          lastVisit_gradientLevel[bool_index]    <- curr_noveltyLvl[curr_numLvl]
+          
+          # Novelty score
+          bool_index <- !is.na(noveltyScore) & noveltyScore <= quant_noveltyScore[ind1]
+          noveltyScore_gradientLevel[bool_index] <- curr_noveltyLvl[curr_numLvl]
+        } else {
+          # Get indices
+          ind1       <- curr_novelNums[i] - 1
+          ind2       <- curr_novelNums[i]
+          
+          # Last visits
+          bool_index <- !is.na(lastVisit) & lastVisit > quant_lastVisit[ind1] & lastVisit <= quant_lastVisit[ind2]
+          lastVisit_gradientLevel[bool_index]    <- curr_noveltyLvl[i]
+          
+          # Novelty score
+          bool_index <- !is.na(noveltyScore) & noveltyScore > quant_noveltyScore[ind1] & noveltyScore <= quant_noveltyScore[ind2]
+          noveltyScore_gradientLevel[bool_index] <- curr_noveltyLvl[i]
+        }
+      }
+      
+      # Add back to data frame
+      tempData$lastVisit_gradientLevel    <- lastVisit_gradientLevel
+      tempData$noveltyScore_gradientLevel <- noveltyScore_gradientLevel
+      
+      # Calculate the average times
+      tempData_agg1 <- na.omit(ddply(tempData, c("lastVisit_gradientLevel"), 
+                                     summarise, 
+                                     mean_duration = mean(duration),
+                                     median_duration = median(duration),
+                                     min_duration = min(duration),
+                                     max_duration = max(duration),
+                                     mean_value = mean(lastVisit),
+                                     min_value = min(lastVisit),
+                                     max_value = max(lastVisit),
+                                     num_events = length(lastVisit),
+                                     mean_per_tra = mean(per_tra),
+                                     mean_per_rot = mean(per_rot),
+                                     mean_per_sta = mean(per_sta),
+                                     mean_per_tra_arc = mean(arcsine_transform(per_tra)),
+                                     mean_per_rot_arc = mean(arcsine_transform(per_rot)),
+                                     mean_per_sta_arc = mean(arcsine_transform(per_sta)),
+                                     mean_dist2target = mean(mean_dist2target),
+                                     mean_dist2closet = mean(mean_dist2closet)))
+      tempData_agg2 <- na.omit(ddply(tempData, c("noveltyScore_gradientLevel"), 
+                                     summarise, 
+                                     mean_duration = mean(duration),
+                                     median_duration = median(duration),
+                                     min_duration = min(duration),
+                                     max_duration = max(duration),
+                                     mean_value = mean(noveltyScore),
+                                     min_value = min(noveltyScore),
+                                     max_value = max(noveltyScore),
+                                     num_events = length(lastVisit),
+                                     mean_per_tra = mean(per_tra),
+                                     mean_per_rot = mean(per_rot),
+                                     mean_per_sta = mean(per_sta),
+                                     mean_per_tra_arc = mean(arcsine_transform(per_tra)),
+                                     mean_per_rot_arc = mean(arcsine_transform(per_rot)),
+                                     mean_per_sta_arc = mean(arcsine_transform(per_sta)),
+                                     mean_dist2target = mean(mean_dist2target),
+                                     mean_dist2closet = mean(mean_dist2closet)))
+      
+      # Add to one data frame
+      names(tempData_agg1)[1] <- "level"
+      names(tempData_agg2)[1] <- "level"
+      tempData_agg1$type <- "lastVisit"
+      tempData_agg2$type <- "noveltyScore"
+      tempData_agg <- rbind(tempData_agg1, tempData_agg2)
+      
+      
+      # Create a data frame with extra information and add to list
+      extra_info <- tempData_agg
+      extra_info$subj <- subjIDs[subj]
+      extra_info$run  <- runs[run]
+      extra_info$curr_numLvl <- curr_numLvl
+      extra_info$runType <- runType[run]
+      condition_info[[length(condition_info) + 1]] <- extra_info
+      
+      # Get runstartTime
+      runStartTime <- trial_results[trial_results$ppid == subjIDs[subj] & 
+                                    trial_results$block_num == run, 'runStartTime'][1]
+      
+      # Things that need to be changed as the function of run type
+      if(runType[run] == "e"){
+        boolIndex <- str_detect(OLMe_7T_SpaNovGradient1, pattern = paste0(curr_numLvl, "lvl"))
+        OLMe_7T_SpaNovGradient1_sub <- OLMe_7T_SpaNovGradient1[boolIndex]
+        tempFolder1 <- OLMe_7T_SpaNovGradient1_sub[subj]
+      } else if (runType[run] == "r"){
+        boolIndex <- str_detect(OLMe_7T_SpaNovGradient1, pattern = paste0(curr_numLvl, "lvl"))
+        OLMr_7T_SpaNovGradient1_sub <- OLMr_7T_SpaNovGradient1[boolIndex]
+        tempFolder1 <- OLMr_7T_SpaNovGradient1_sub[subj]
+      } else {
+        stop("Wrong runType.")
+      }
+      
+      # Create the folders
+      currentFolder1 <- paste0(tempFolder1, "run-", sprintf("%02d", runs[run]), "/EVs/")
+      dir.create(currentFolder1, recursive = TRUE, showWarnings = FALSE)
+      
+      ############# Events for Novelty score ###############
+      # loop through all events and create the files
+      unique_events <- curr_noveltyLvl
+      for(event in 1:length(curr_noveltyLvl)){
+        ####### Novelty score ________________________________________
+        # Subset to current event
+        tempData_sub <- tempData[!is.na(tempData$noveltyScore_gradientLevel) & tempData$noveltyScore_gradientLevel == unique_events[event], ]
+        
+        # The Onsets are made relative to runStartTime
+        tempDF <- data.frame(onset = tempData_sub$onset - runStartTime,
+                             duration = tempData_sub$duration,
+                             weight   = 1)
+        
+        # Write file following this pattern: SpaNovGradient_noveltyScore_3_lvl1
+        write.table(tempDF, 
+                    file = paste0(currentFolder1, 
+                                  "SpaNovGradient_noveltyScore_", 
+                                  curr_numLvl, "_", 
+                                  unique_events[event], ".txt"),
+                    col.names = FALSE, 
+                    row.names = FALSE,
+                    quote =  FALSE,
+                    sep = '\t')
+        
+        # Add more information to save to list
+        tempDF$runType <- runType[run]
+        tempDF$numLvl  <- curr_numLvl
+        tempDF$run     <- runs[run]
+        tempDF$event   <- unique_events[event]
+        tempDF$subj    <- subjIDs[subj]
+        tempDF$var     <- "noveltyScore"
+        tempDF$noveltyScore <- tempData_sub$noveltyScore
+        event_file_list[[length(event_file_list) + 1]] <- tempDF
+      }
+      
+      # Create co-variate files for per_tra and dur_tra
+      ## Duration of translation
+      ### The Onsets are made relative to runStartTime
+      tempDF <- data.frame(onset = tempData$onset - runStartTime,
+                           duration = tempData$duration,
+                           weight   = tempData$dur_tra)
+      
+      ### Remove NA
+      tempDF <- tempDF[!is.na(tempData$noveltyScore_gradientLevel), ]
+      
+      ### Scale to mean centre
+      tempDF$weight <- scale(tempDF$weight)
+        
+      ### Write file following this pattern: SpaNovGradient_noveltyScore_3_dur_tra
+      write.table(tempDF, 
+                  file = paste0(currentFolder1, 
+                                  "SpaNovGradient_noveltyScore_", 
+                                  curr_numLvl, "_dur_tra.txt"),
+                  col.names = FALSE, 
+                  row.names = FALSE,
+                  quote =  FALSE,
+                  sep = '\t')
+      
+      ## Percentage of translation
+      ### The Onsets are made relative to runStartTime
+      tempDF <- data.frame(onset = tempData$onset - runStartTime,
+                           duration = tempData$duration,
+                           weight   = tempData$per_tra)
+      
+      ### Remove NA
+      tempDF <- tempDF[!is.na(tempData$noveltyScore_gradientLevel), ]
+      
+      ### Scale to mean centre
+      tempDF$weight <- scale(tempDF$weight)
+        
+      ### Write file following this pattern: SpaNovGradient_noveltyScore_3_per_tra
+      write.table(tempDF, 
+                  file = paste0(currentFolder1, 
+                                  "SpaNovGradient_noveltyScore_", 
+                                  curr_numLvl, "_per_tra.txt"),
+                  col.names = FALSE, 
+                  row.names = FALSE,
+                  quote =  FALSE,
+                  sep = '\t')
+      
+    } 
+  }
+}
+```
+
+Saving an image to analyse further aspects of the events. 
+
+```{r save_image}
+save.image(file = "ignore_eventTable3/images/SpaNov_event_file_gradients.RData")
+```
+
+## Analyse the results
+Now, we will visually analyse the event files that we have created. 
+
+### How many events are there for each variant on average?
+```{r number_event_average}
+# Create a data frame
+condition_info_df <- rbindlist(condition_info)
+
+# Ignore retrieval and last visit
+condition_info_df <- condition_info_df[condition_info_df$runType == "e" & condition_info_df$type == 'noveltyScore', ]
+
+# Calculate average
+num_event_avg <- ddply(condition_info_df, c('subj', "run", "curr_numLvl"), summarise, num_events = mean(num_events))
+
+# Create factors
+num_event_avg$f_run         <- as.factor(num_event_avg$run)
+num_event_avg$f_curr_numLvl <- as.factor(num_event_avg$curr_numLvl)
+
+# Visualise
+ggplot(num_event_avg, aes(x = f_curr_numLvl, y = num_events, fill = f_curr_numLvl)) +
+  facet_grid(~f_run) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(height = 0, alpha = 0.3) +
+  theme(legend.position = "none") +
+  labs(title = "Number of visits", x = "Number of levels", y = "Number of events")
+```
+
+### What are the ranges of scores for each level?
+Below, we see the range (min & max.) for each participant for each level. The columns are for Run 1 & 2, while the rows are for the different number of different level per analysis. 
+
+```{r range_plot}
+# Create factors
+condition_info_df$f_run <- as.factor(condition_info_df$run)
+condition_info_df$id <- 1:nrow(condition_info_df)
+
+# Visualise
+ggplot(condition_info_df, aes(y = subj, colour = level, group = id)) +
+  facet_grid(curr_numLvl~f_run, scales = "free_x") +
+  geom_point(aes(x = min_value)) +
+  geom_point(aes(x = max_value)) +
+  geom_segment(aes(y = subj, yend = subj, x = min_value, xend = max_value)) + 
+  theme(legend.position = "none",
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  labs(title = "Range of values", x = "Novelty score", y = "Subject")
+```
+
+Here we see that the levels do cover different ranges of values. 
+
+Another way to look at the same question, is to display the range of each level as difference scores (max - min):
+
+```{r level_range}
+# Calculate level range
+condition_info_df$level_range <- condition_info_df$max_value - condition_info_df$min_value
+
+# Visualise
+ggplot(condition_info_df, aes(x = level, y = level_range, fill = level)) +
+  facet_grid(curr_numLvl~f_run, scales = "free_x") +
+  geom_boxplot() +
+  theme(legend.position = "none") +
+  labs(title = "Range of values per level", x = "Novelty level", y = "max - min")
+```
+
+### Distances between levels
+Since, we're not cutting the values in equal pieces based on the range but based on the distribution. The distance between the levels is not equal. 
+
+```{r dist_between_levels}
+# Calculate the distance between the levels
+dist_between_levels <- ddply(condition_info_df, c("curr_numLvl", "f_run", "level"), summarise, mean_value = mean(mean_value))
+dist_between_levels <-  ddply(dist_between_levels, c("curr_numLvl","f_run"), mutate, difference = c(NA, diff(mean_value)))
+
+# Visualise
+ggplot(dist_between_levels, aes(x = level, y = difference, fill = level)) +
+  facet_grid(curr_numLvl~f_run, scales = "free_x") +
+  geom_bar(stat = "identity") +
+  theme(legend.position = "none") +
+  labs(title = "Difference between the levels", x = "Novelty level", y = "Difference to previous level's mean")
+```
+
+### The novelty scores
+More of sanity check, we plot the average novelty score per level and analysis:
+
+```{r average_plot}
+ggplot(condition_info_df, aes(x = level, y = mean_value, colour = level)) +
+  facet_grid(curr_numLvl~f_run) +
+  geom_jitter(height = 0) + 
+  theme(legend.position = "none") +
+  labs(title = "Average novelty scores", x = "Novelty level", y = "Average novelty score")
+```
+
+This does show that each level has lower novelty scores passing this sanity check. 
+
+### Loocomotion states as a function of the level
+Here, we're actually only interested in the analysis that we used for the paper, which is the 6-level version of the analysis. The same is to check if locomotion states are different for the different novelty/familiarity levels. 
+
+```{r locomotion_6levels}
+# Subset to the analysis with 6 levels
+subData_6levels <- condition_info_df[condition_info_df$curr_numLvl == 6, ]
+
+# Create the plots
+p1 <- ggplot(subData_6levels, aes(x = level, y = mean_per_tra, fill = level)) +
+  geom_boxplot() +
+  theme(legend.position = "none") +
+  labs(title = "Translation", x = "Novelty level", y = "Avg. percent translating")
+
+p2 <- ggplot(subData_6levels, aes(x = level, y = mean_per_rot, fill = level)) +
+  geom_boxplot() +
+  theme(legend.position = "none") +
+  labs(title = "Rotation", x = "Novelty level", y = "Avg. percent rotating")
+
+p3 <- ggplot(subData_6levels, aes(x = level, y = mean_per_sta, fill = level)) +
+  geom_boxplot() +
+  theme(legend.position = "none") +
+  labs(title = "Stationary", x = "Novelty level", y = "Avg. percent standing")
+
+plot_grid(p1, p2, p3, ncol = 3)
+```
+
+Indeed it seems to be the case that stationary/rotation periods are lower when the sector is more familiar. 
+
+### Average distance to the objects
+We're again only interested in the 6-level variant to see if any of the middle levels are odd in terms of the average distance to the target object of the trial or in terms of the average distance to the closest object. 
+
+```{r dist2objects}
+# Create the plots
+p1 <- ggplot(subData_6levels, aes(x = level, y = mean_dist2target, fill = level)) +
+  geom_boxplot() +
+  theme(legend.position = "none") +
+  labs(title = "Distance to the\ntarget object", 
+       x = "Novelty level", y = "Avg. distance to target in vm")
+
+p2 <- ggplot(subData_6levels, aes(x = level, y = mean_dist2closet, fill = level)) +
+  geom_boxplot() +
+  theme(legend.position = "none") +
+  labs(title = "Distance to the\nclosest object", 
+       x = "Novelty level", y = "Avg. distance to closest in vm")
+
+# Combine plots
+plot_grid(p1, p2, ncol = 2)
+```
+
+It doesn't seem to be the case that Level 2 is odd relative to the other levels. 
+
+### A couple of further checks
+
+Summary for the plots below:
+
+1. We see tiny variations in terms of the number of events between the levels.
+2. Especially in Run 2, the duration of the events does decrease with increasing levels of familiarity.
+
+
+```{r further_checks}
+# Plot the number of events per condition
+ggplot(condition_info_df, aes(x = level, y = num_events , fill = level)) + 
+  facet_grid(run~curr_numLvl, scales = "free_x") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(height = 0, alpha = 0.3, width = 0.1) +
+  theme(legend.position = 'none', axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Time since/novelty score", x = "Novelty condition", y = "Number of events")
+
+# Calculate unique number of number of events per subject for the level 6
+num_events6 <- condition_info_df[condition_info_df$curr_numLvl == 6, ]
+num_events6_agg <- ddply(num_events6, c("subj", "f_run"), summarise, length_uniq = length_uniq(num_events))
+# Conclusion: The maximum number of unique number of events, which makes sense as not everything is 
+# dividable into 6 equal numbers
+
+# Plot the duration per condition
+ggplot(condition_info_df, aes(x = level, y = mean_duration, fill = level)) + 
+  facet_grid(run~curr_numLvl, scales = "free_x") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(height = 0, alpha = 0.3, width = 0.1) +
+  theme(legend.position = 'none', axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Time since/novelty score", x = "Novelty condition", y = "Mean event duration in secs")
+
+ggplot(condition_info_df, aes(x = level, y = max_duration, fill = level)) + 
+  facet_grid(run~curr_numLvl, scales = "free_x") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(height = 0, alpha = 0.3, width = 0.1) +
+  theme(legend.position = 'none', axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Time since/novelty score", x = "Novelty condition", y = "Max event duration in secs")
+
+ggplot(condition_info_df, aes(x = level, y = median_duration, fill = level)) + 
+  facet_grid(run~curr_numLvl, scales = "free_x") +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(height = 0, alpha = 0.3, width = 0.1) +
+  theme(legend.position = 'none', axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Time since/novelty score", x = "Novelty condition", y = "Median event duration in secs")
+```
+
+# Examining collinearity and variance inflation factor
+The codes is adapted from J. Mumford (see https://www.youtube.com/watch?v=H1S72z6o3HY and https://www.youtube.com/watch?v=NJu2lb8uZSg). 
+
+```{r vif_functions}
+# Function to take rhe event epochs and convolve with HRF to make time series
+convolve_events <- function(onsets, durations, TR_conv, TR, numScans){
+  # Function that the time series for the regressor
+  # onsets            : stimulus onset times in seconds
+  # durations         : duration (same for stim and resp)
+  # TR_conv           : Time resolution used for convolution
+  # TR                : TR for the BOLD data
+  # numScans          : Number of scans
+  
+  # Calculate the number of scans for the specific convolution TR
+  numScans_conv <- numScans/TR_conv
+  
+  # Comment from J. Mumford
+  # Adding this (3/22/2019) because the function seems to have stopped working
+  # when I try to use the "times" option of fmri.stimulus
+  onsets_scans = onsets/TR_conv
+  
+  # Create the regressor
+  regressor = fmri.stimulus(scans = numScans_conv, 
+                               onsets = onsets_scans,
+                               durations = durations,
+                               #type = "gamma",
+                               TR = TR_conv)
+  # downsample to TR
+  regressor = regressor[seq(from = 1, to = length(regressor), by = 1/TR_conv)]
+
+  # mean center regressor
+  regressor = regressor - mean(regressor)
+
+  # Return
+  return(regressor)
+} # end of function
+
+# Function to calculate vif
+calculate_vif <- function(onset, duration, event){
+  # Calculate how long the runs was and how many scans it had plus number of event types
+  run_duration <- round(max(onset) + max(duration) + 20)
+  numScans     <- run_duration/TR
+  uni_events   <- unique(event)
+  numEvents    <- length(uni_events)
+  
+  # Create empty df
+  df <- data.frame(matrix(nrow = 0, ncol = 2))
+  
+  # Loop through all the events
+  for(i in 1:numEvents){
+    # Convolve the events with HRF for current event
+    regressor <- convolve_events(onset[event == uni_events[i]], 
+                                 duration[event == uni_events[i]], TR_conv, TR, numScans)
+    
+    # Add to df
+    df <- rbind(df, data.frame(TR = 1:numScans, event = uni_events[i], AU = regressor))
+  }
+  
+  # Code for visualising the HRFs
+  #ggplot(df, aes(x = TR, y = AU, colour = event)) + geom_line()
+  
+  # Convert from long to wide and add data
+  df_wide   <- reshape2::dcast(df, TR ~ event, value.var = "AU")
+  df_wide$y <- rnorm(nrow(df_wide))
+  
+  formula <- paste("y ~", paste(names(df_wide)[c(2:(numEvents+1))], collapse = " + "))
+  
+  mod.fake <-  lm(formula, data = df_wide, x = TRUE)
+  results  <- vif(mod.fake)
+  
+  # Return value
+  return(as.numeric(results))
+}
+```
+
+```{r calculate_VIF}
+# Parameters
+TR      <- 1
+TR_conv <- 0.1
+
+# Bind list to df
+data <- rbindlist(event_file_list)
+
+# Only encoding
+data <- data[data$runType == 'e', ]
+
+# Calculate VIF
+VIF_values <- ddply(data, c("subj", "runType", "run", "var", "numLvl"), 
+                    summarise,VIF = calculate_vif(onset, duration, event), event = unique(event))
+
+VIF_values_sub1 <- VIF_values[VIF_values$var == 'noveltyScore', ]
+
+ggplot(VIF_values_sub1, aes(x = event, y = VIF , fill = event)) + 
+  facet_grid(numLvl~.) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(height = 0, alpha = 0.3) +
+  theme(legend.position = 'none', axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Novelty score", x = "Novelty condition", y = "Variance inflation factor")
+```
+
+Conclusion: The VIF analysis looks pretty good with no differences between the groups. 
