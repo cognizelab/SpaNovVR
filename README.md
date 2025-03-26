@@ -23,3 +23,4 @@ Here is a detailed guide to the code & files:
 - ***SpaNov_gradient_6lvl_smo4_MSMAll_HCP.sh*** &  ***SpaNov_gradient_6lvl_smo4_MSMAll_PALM.sh*** the script to run the HCP-style task fMRI analysis using a QuNex container and the script to run the corresponding the PALM analysis. This version, which received further smoothing (4 mm), was used to the GLM analyses.
 - ***SpaNov_paper_brms_noveltyScore.R*** script to run the `brms` model of spatial novelty as a function of time.
 - ***SpaNov_paper_calculate_gradients.R*** script to create the gradient maps.
+- ***tables*** folder that contains the spreadsheets for the supplementary tables. 
