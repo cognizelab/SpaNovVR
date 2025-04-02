@@ -18,6 +18,7 @@ Here is a detailed guide to the code & files:
 - ***resting_state_analysis***
 	- ***analyse_conn_via_SpaNov_gradient.R*** script to calculate average connectivity between gradients in hippocampus and PMC (+ .slurm script).
 	- ***Get_HC_2_cortex_conn_matrices.R*** script to calculate the dense connectivity between each hippocampal voxel and each cortical vertex (+ .slurm script).
+- ***tables*** folder that contains the spreadsheets for the supplementary tables. 
 - ***utility_scripts***
 	- ***anonymiser_script.R*** script to anonymise the participant IDs.
 	- ***data_combination_script.R*** script to concatenate and prepare the raw data for analysis.
@@ -37,3 +38,4 @@ Example usage of `pValueMap2clusters.sh`:
 pValueMap="/media/alex/work/Seafile/imaging_results/SpaNov/OLMe_7T_SpaNov_gradient_6lvl_smo4_MSMAll/cope7.feat/stats/vwc/results_lvl2cope1_dat_ztstat_cfdrp_c1.dscalar.nii"
 bash /media/alex/work/research_projects/OLM_project/analysis/utility_scripts/pValueMap2clusters.sh ${pValueMap}
 ```
+
