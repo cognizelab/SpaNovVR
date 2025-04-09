@@ -25,12 +25,12 @@ Here is a detailed guide to the code & files:
 	- ***hippocampus_normal_point_to_curve_projection.R*** script to calculate how anterior each voxel in the hippocampus is. 
 	- ***pValueMap2clusters.sh*** script to find significant clusters (see below for code example).
 - ***SpaNov_cortical_gradient_analysis_max.R*** & ***SpaNov_cortical_gradient_analysis_min.R*** scripts to run the depth-first algorithm on the cortical gradient maps.
-- ***SpaNov_event_file_creation_gradient.html*** & ***SpaNov_event_file_creation_gradient.html*** the script to create the event files.
+- ***SpaNov_event_file_creation_gradient.Rmd*** & ***SpaNov_event_file_creation_gradient.html*** the script to create the event files.
 - ***SpaNov_gradient_6lvl_smo2_MSMAll_HCP.sh*** &  ***SpaNov_gradient_6lvl_smo2_MSMAll_PALM.sh*** the script to run the HCP-style task fMRI analysis using a QuNex container and the script to run the corresponding the PALM analysis. This version, which did not receive further smoothing (2 mm), was used to the gradient analyses.
 - ***SpaNov_gradient_6lvl_smo4_MSMAll_HCP.sh*** &  ***SpaNov_gradient_6lvl_smo4_MSMAll_PALM.sh*** the script to run the HCP-style task fMRI analysis using a QuNex container and the script to run the corresponding the PALM analysis. This version, which received further smoothing (4 mm), was used to the GLM analyses.
 - ***SpaNov_paper_brms_noveltyScore.R*** script to run the `brms` model of spatial novelty as a function of time.
 - ***SpaNov_paper_calculate_gradients.R*** script to create the gradient maps.
-
+- ***SpaNov_results.Rmd*** & ***SpaNov_results.html*** the main script for the analyses.
 
 Example usage of `pValueMap2clusters.sh`:
 

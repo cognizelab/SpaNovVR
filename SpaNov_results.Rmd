@@ -1,0 +1,2195 @@
+---
+title: "Analyses for Graded encoding of spatial novelty scales in the human brain"
+author: "Joern Alexander Quent"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    theme: united
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+# Preparation
+## Libs and parameters
+```{r load_libs}
+# Libraries
+library(ggplot2)
+library(assortedRFunctions)
+library(cowplot) 
+library(stringr)
+library(plyr)
+library(mgcv)
+library(foreach)
+library(doParallel)
+library(BayesFactor)
+library(ciftiTools)
+library(viridis)
+library(tidybayes)
+library(bayesplot)
+library(brms)
+#library(lmerTest)
+library(data.table)
+library(knitr)
+#library(caTools) 
+#library(e1071) 
+library(readxl)
+library(ggridges)
+library(ggforce)
+library(marginaleffects)
+library(gghalves)
+library(effectsize)
+
+# For SVM
+library(caTools) 
+library(e1071) 
+```
+
+<details>
+ <summary>Some settings that change from computer to computer that I work on. </summary>
+```{r computer_specific_settings}
+# Use correct locations and other settings based on computer
+if(Sys.info()[4] == "DESKTOP-335I26I"){
+  # Work laptop (Windows)
+  ## Setting paths to workbench installation
+  ciftiTools.setOption("wb_path", "C:/Program Files/workbench-windows64-v1.5.0/workbench/bin_windows64")
+  
+  ## Path to the imaging data
+  path2imaging_results2 <- "D:/Seafile/imaging_results"
+  
+} else if(Sys.info()[4] == 'DESKTOP-91CQCSQ') {
+  # Work desktop (Windows)
+  ## Setting paths to workbench installation
+  ciftiTools.setOption("wb_path", "D:/workbench/bin_windows64")
+  
+  ## Path to the imaging data
+  path2imaging_results2 <- "D:/imaging_results"
+} else if(Sys.info()[4] == 'alex-Zenbook-UX3404VA-UX3404VA') {
+  # Work laptop (Linux)
+  ## Setting paths to workbench installation
+  ciftiTools.setOption("wb_path", "/usr/bin/wb_command")
+  
+  ## Path to the imaging data
+  path2imaging_results2 <- "/media/alex/shared/Seafile/imaging_results"
+  
+} else if(Sys.info()[4] == "greengoblin"){
+  # Main desktop PC (Linux)
+  ciftiTools.setOption("wb_path", "/usr/bin/wb_command") 
+  path2imaging_results2 <- "/media/alex/work/Seafile/imaging_results" 
+} else if(Sys.info()[4] == "GREEN-GOBLIN-WI"){
+  # Main desktop PC 
+  ciftiTools.setOption("wb_path", "C:/Program Files/workbench-windows64-v2.0.1/workbench/bin_windows64")
+  path2imaging_results2 <- "E:/Seafile/imaging_results" 
+} else {
+  # Personal laptop (Windows)
+  ## Setting paths to workbench installation
+  ciftiTools.setOption("wb_path", "D:/Program Files/workbench/bin_windows64")
+  
+  ## Path to the imaging data
+  path2imaging_results2 <- "D:/OLM/imaging_results"
+}
+
+# Seed
+set.seed(20240205)
+```
+</details>
+
+<details>
+ <summary>Click here for detailed session information. </summary>
+```{r session_info}
+sessioninfo::session_info()
+```
+</details>
+
+<details>
+ <summary>Click here for chunk for statistical reporting parameters. </summary>
+```{r colour_and_report_params}
+# Significance cut off 
+cutOff <- 1.301 # Because of -log(0.05, 10)
+
+# Parameters how to report means
+report_type   <- 1
+digits1       <- 2
+rounding_type <- "signif"
+
+# Font sizes
+font_size   <- 8
+base_theme  <- theme_classic(base_size = font_size) + 
+               theme(plot.title = element_text(hjust = 0.5),
+                     plot.background = element_blank(), 
+                     panel.background = element_rect(fill = "transparent"))
+
+base_theme2  <- theme_classic(base_size = font_size) + 
+               theme(plot.title = element_text(hjust = 0.5),
+                     plot.background = element_blank(), 
+                     panel.background = element_rect(fill = "transparent"),
+                     text = element_text(family = ""),
+                     strip.background = element_rect(color="white", fill="white"))
+
+# Parameters for saving figures
+## Information: https://www.nature.com/ncomms/submit/how-to-submit
+### PDF page: 210 x 276 mm
+### Column widths in mm
+single_column <- 88
+double_column <- 180
+dpi           <- 1000
+figurePath    <- "figures/SpaNov/"
+axisExpand  <- 0.05 # multiply the x & y values
+
+# Function to calculate axis limits
+calc_axis_limits <- function(x, axisExpand, digits = 2, rounding_type = "signif"){
+  # Get the empirical values
+  val_range <- range(x, na.rm = TRUE)
+  
+  # Create axis_breaks
+  axis_breaks <- rep(NA, 3)
+  
+  # Add middle point
+  axis_breaks[2] <- mean(val_range, na.rm = TRUE)
+  
+  # Minimum value
+  if(val_range[1] < 0){
+    axis_breaks[1] <- val_range[1] + val_range[1]*axisExpand
+  } else {
+    axis_breaks[1] <- val_range[1] - val_range[1]*axisExpand
+  }
+  
+  # Maximum value
+  if(val_range[2] < 0){
+    axis_breaks[3] <- val_range[2] - val_range[2]*axisExpand
+  } else {
+    axis_breaks[3] <- val_range[2] + val_range[2]*axisExpand
+  }
+  
+  
+  # Only use significant digits
+  if(rounding_type == "signif"){
+    axis_breaks <- signif(axis_breaks, digits) 
+  } else if(rounding_type == "round"){
+    axis_breaks <- round(axis_breaks, digits) 
+  } else {
+    stop("Wrong rounding_type. Choose signif or round")
+  }
+  
+  # Get the actual limits
+  axis_limits <- axis_breaks[c(1, 3)]
+  
+  # Return list
+  return(list(limits = axis_limits, breaks = axis_breaks))
+}
+
+# Colours used for visualisation
+meanLineColour       <- "red"
+boxplot_borderColour <- "black"
+boxplot_pointColour  <- "darkgrey"
+baseColours          <- c("#7091C0", "#4A66AC", "#364875")
+spectral_colours     <- c("#5956a5", "#a60a44")
+cool_warm_colours    <- c("#3C4DC1", "#B70B28")
+novFam_gradient      <- viridis(n = 6, option = "H", direction = -1)
+
+# Information for Yeo 7
+## Names etc. for the networks in Yeo 7
+Yeo7_fullNames <- c("Frontoparietal", "Default", "Dorsal Attention", "Limbic", 
+                    "Ventral Attention", "Somatomotor", "Visual")
+Yeo7_abbr      <- c("Cont", "Default", "DorsAttn", "Limbic", "SalVentAttn", "SomMot", "Vis")
+
+## Colours used for Yeo 7
+Yeo7_colours <- c("#E79523", "#CD3E4E", "#00760F", "#DCF8A4", "#C43BFA", "#4682B4", "#781286")
+```
+</details>
+
+### Cifti files
+<details>
+ <summary>Click here for support CIFTI files etc. </summary>
+```{r support_cifti}
+# Loading the support CIFTI files
+## Place where to find some of the CIFTI files and parcellations
+CIFTI_locations <- "data/ignore_fMRI_version1/sourceFiles/"
+
+## CIFTI files
+parcellationFile <- "Q1-Q6_RelatedValidation210.CorticalAreas_dil_Final_Final_Areas_Group_Colors_with_Atlas_ROIs2.32k_fs_LR.dlabel.nii"
+CAB_NP           <- "CortexSubcortex_ColeAnticevic_NetPartition_wSubcorGSR_netassignments_LR.dlabel.nii"
+surfLeft         <- "S1200.L.inflated_MSMAll.32k_fs_LR.surf.gii"
+surfRight        <- "S1200.R.inflated_MSMAll.32k_fs_LR.surf.gii"
+
+## Combine CIFTI_locations with file name
+parcellationFile <- paste0(CIFTI_locations, parcellationFile)
+CAB_NP           <- paste0(CIFTI_locations, CAB_NP)
+surfLeft         <- paste0(CIFTI_locations, surfLeft)
+surfRight        <- paste0(CIFTI_locations, surfRight)
+
+## Loading CIFTIw via ciftiTools as xiis
+### Get MMP parcellation
+MMP_xii <- ciftiTools::read_cifti(parcellationFile,
+                                  brainstructures = "all", 
+                                  surfL_fname = surfLeft, 
+                                  surfR_fname = surfRight)
+
+### Load Yeo 7 parcellation
+Yeo7_xii <- ciftiTools::read_cifti("other_stuff/Yeo7.dlabel.nii",
+                                  surfL_fname = surfLeft, 
+                                  surfR_fname = surfRight)
+
+## Load other stuff
+### Load the parcel names for MMP
+parcel_names <- read.csv("data/ignore_fMRI_version1/extracted_values/Parcellations/MP1.0_210V_parcel_names.csv", header = FALSE)
+
+### Load the extracted MNI coordinates
+MNI_coord <- read.csv("other_stuff/cifti_subcortical_MNI152_coordinates.csv")
+
+### Load the hippocampal projection values
+load("other_stuff/projected_HC.RData")
+```
+
+</details>
+
+## Loading and preparing the data
+<details>
+ <summary>Click here for loading data. </summary>
+```{r load_data}
+# Load the data
+## Specify paths where the data is saved
+path2data <- "data/ignore_fMRI_version1/"
+EV_folder <- "ignore_eventTable2/"
+
+## Load the look-up table that contains information of R-numbers which are retracted 
+lookupTable  <- read.csv(paste0(path2data, "lookUpTable.csv"))
+
+## Load that was used to calculate the events
+load("ignore_eventTable3/images/SpaNov_event_file_contPM.RData")
+
+## Load .RData images of the combined data (all subject in one DF)
+load(paste0(path2data, "combined_data/demographics.RData"))
+load(paste0(path2data, "combined_data/DW_all_data.RData"))
+load(paste0(path2data, "combined_data/OLM_7T_all_data.RData"))
+load(paste0(path2data, "combined_data/OLM_3T_all_data.RData"))
+load(paste0(path2data, "combined_data/question_data.RData"))
+
+# Select the subjects included in this analysis
+## Load the subjects that are included in this analysis
+subjectFile <- readLines(paste0(path2data, "SpaNov_subject2analyse.txt"))
+subjIDs_R   <- str_split(subjectFile, pattern = ",")[[1]] 
+subjIDs     <- lookupTable$anonKey[lookupTable$Rnum %in% subjIDs_R]
+# Important note: subjIDs_R do not have the same order as subjIDs!!!!!!!!!!!!!
+
+## Subset to data that is being included in the analysis
+OLM_7T_position_data <- OLM_7T_position_data[OLM_7T_position_data$subject %in% subjIDs, ]
+demographics         <- demographics[demographics$subject %in% subjIDs, ]
+DW_position_data     <- DW_position_data[DW_position_data$subject %in% subjIDs, ]
+OLM_7T_logEntries    <- OLM_7T_logEntries[OLM_7T_logEntries$ppid %in% subjIDs, ]
+OLM_7T_trial_results <- OLM_7T_trial_results[OLM_7T_trial_results$subject %in% subjIDs, ]
+question_data        <- question_data[question_data$subject %in% subjIDs, ]
+
+## Subset to retrieval only
+OLM_7T_retrieval <- OLM_7T_trial_results[OLM_7T_trial_results$trialType == "retrieval", ]
+
+# Exclude control trials
+no_control <- positionData2[positionData2$trialType != "control", ]
+
+# Include only Run 1, 2 and 3 because the last retrieval run 
+# doesn't count as far as this analysis is concerned
+no_control <- no_control[no_control$run %in% 1:3, ]
+
+# Get the object locations to verify object placement in screenshots
+obj_locations <- ddply(OLM_7T_trial_results, c("targets", "objectName", "targetNames"),
+                       summarise, object_x_sd = sd(object_x), object_x = mean(object_x),
+                       object_z_sd = sd(object_z), object_z = mean(object_z))
+```
+
+</details>
+
+# Results
+## Modelling of spatial novelty during naturalistic navigation
+### Reporting demographic information 
+```{r demographic_information}
+n       <- nrow(demographics)
+str1    <- mean_SD_str2(demographics$age, type = 1, digits = digits1, rounding_type = rounding_type, measure = "years")
+females <- table(demographics$gender)[1]
+males   <- table(demographics$gender)[2]
+```
+
+- n = `r n`
+- Age = `r str1`
+- Gender ratio = `r females`/`r males`
+- Age range `r range(demographics$age)`
+
+### Figure 1
+#### 3D histogramms
+```{r function_to_get_seeds}
+get_seeds_from_voronoi_tessellation_hexagon <- function(limValues, numSeeds){
+  # Create bins like it is done in voronoi_tessellation_grid_binning_2d
+  # This is code directly from that function to get the coordinates of each sector
+  xLim    <- sort(limValues)
+  yLim    <- sort(limValues)
+  byValue <- ((xLim[2] - xLim[1])/(numSeeds - 1))
+  xRange  <- seq(from = xLim[1], to = xLim[2], by = byValue)
+  xStepSize <- xRange[2] - xRange[1]
+  x_shiftValue <- xStepSize/4
+  yRange <- seq(from = yLim[1], to = yLim[2], by = xStepSize * (sqrt(3)/2))
+  yRange <- yRange[1:length(xRange)]
+  yRange <- yRange + (yLim[2] - max(yRange))/2
+  seeds <- data.frame(x = xRange[1], y = yRange)
+  shiftIndex <- rep(c(1, -1), length.out = nrow(seeds))
+  seeds$x <- seeds$x + shiftIndex * x_shiftValue
+  for(i in 2:length(xRange)){
+    seeds <- rbind(seeds, data.frame(x = xRange[i] + shiftIndex * x_shiftValue, y = yRange))
+  }
+  seeds$sector <- row.names(seeds)
+  return(seeds)
+}
+```
+
+This creates the data necessary to create the 3D histogram using blender.
+
+```{r data_for_blender_3Dhists, eval = FALSE}
+# Load data from 
+load("E:/research_projects/OLM_project/analysis/ignore_eventTable3/images/SpaNov_event_file_contPM.RData")
+
+# Convert list to data frame
+data <- rbindlist(subj_list, idcol = "subject")
+
+# Subject to character
+data$subject <- as.character(data$subject)
+
+# Subset to run 1, 2, 3 to include the first retrieval run
+data_sub2 <- data[data$run != 4, ]
+
+# Calculate average/sum per subject
+sector_average <- ddply(data_sub2, c("subject","sector"), summarise, 
+                        visits = sum(visits, na.rm = TRUE),
+                        lastVisit = mean(lastVisit, na.rm = TRUE))
+
+# Calculate average per sector
+sector_average <- ddply(sector_average, c("sector"), summarise, 
+                        visits = mean(visits, na.rm = TRUE),
+                        lastVisit = mean(lastVisit, na.rm = TRUE))
+
+# Bin the environment
+limValues   <- c(-90,90)
+numSeeds    <- 10 # Number of values per axis
+
+# Create bins like it is done in voronoi_tessellation_grid_binning_2d
+seeds <- get_seeds_from_voronoi_tessellation_hexagon(limValues, numSeeds)
+
+# Add x & y coordinates to sector_visits. For this just loop the df
+sector_average$x <- NA
+sector_average$y <- NA
+for(i in 1:nrow(sector_average)){
+  # Get current sector
+  currentSector <- sector_average$sector[i]
+  
+  # Get corresponding row index in seeds
+  rowID <- which(seeds$sector == currentSector)
+  
+  # Assign the correct coordinates based on rowID
+  sector_average$x[i] <- seeds$x[rowID]
+  sector_average$y[i] <- seeds$y[rowID]
+}
+
+
+# Prepare data for 3D plot for the average number of visits per persons to each sector
+temp_data <- sector_average[,-3]
+
+# Write .csv file
+write.csv(x = temp_data, file = "other_stuff/blenderData_avg_visits.csv", 
+          quote = FALSE, row.names = FALSE)
+
+# Prepare data for 3D plot for the average number of visits per persons to each sector
+## Remove NA values & remove wrong column
+temp_data <- na.omit(sector_average)
+temp_data <- temp_data[,-2]
+
+# Write .csv file
+write.csv(x = temp_data, file = "other_stuff/blenderData_avg_time_since_last_visit.csv", 
+          quote = FALSE, row.names = FALSE)
+
+# Colours
+barColours <- viridisLite::viridis(n = 5, option = "D")
+```
+
+Range of values is 75 to 111321.
+
+#### Total path length density plot
+```{r travelled_paths_density}
+# Subset to only data from the encoding part
+pathData <- positionData[positionData$trialType == 'encoding', ]
+
+# Calculate the how much the perfect participant would need to travel
+## Subset to only encoding trials
+boolIndex       <- OLM_7T_trial_results$trialType == "encoding"
+OLM_7T_encoding <- OLM_7T_trial_results[boolIndex, ]
+
+# Function to calculate the path lengths 
+calculate_path_length <- function(pos_x, pos_z){
+  # Calculate difference between points and square them
+  diff_X <- diff(pos_x)^2
+  diff_z <- diff(pos_z)^2
+  
+  # Calculate the sum and take the square root
+  dists_travelled <- sqrt(diff_X + diff_z)
+  
+  # Sum up all distances travelled to one path_length
+  return(sum(dists_travelled))
+}
+
+# Calculate the path traveled for each trial and each subject
+# Use pathData because it only includes encoding data
+path_lenghts <- ddply(pathData, c("ppid", "trial"), 
+                      summarise, 
+                      distance = calculate_path_length(pos_x, pos_z))
+
+# Calculate the total path lengths for the whole experiment
+total_path_lengths <- ddply(path_lenghts, c("ppid"), 
+                            summarise, distance = sum(distance))
+
+# Get the range of the values to get the axis limits
+axis_x <- calc_axis_limits(c(total_path_lengths$distance), 0)
+  
+# Create a box plot 
+total_path_lengths_plot <- ggplot(total_path_lengths, aes(x = distance)) + 
+  geom_density(fill = baseColours[1], linewidth = 0.2) + 
+  geom_jitter(aes(y = -0.001), height = 0.0005, 
+              size = 0.1, width = 0, colour = boxplot_pointColour) +
+  labs(y = "Density", x = "Total path length (vm)", title = "") +
+  scale_x_continuous(breaks = axis_x$breaks) + 
+  coord_cartesian(xlim = axis_x$limits, 
+                  expand = FALSE, ylim = c(-0.001*2, 0.0065)) +
+  base_theme +
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        plot.margin = unit(c(1, 2.5, 1, 2.5), "mm"))
+
+```
+
+#### Event durations
+```{r event_durations}
+# Load the event files
+event_files <- list.files(path = "ignore_eventTable3/OLMe_7T_SpaNov_gradient_6lvl/", recursive = TRUE, full.names = TRUE)
+
+# Remove "per_tra.txt" and "dur_tra.txt" from list
+event_files <- event_files[!str_detect(event_files, "tra.txt")]
+
+# Create list
+event_list <- list()
+
+# Load the event files
+for(i in 1:length(event_files)){
+  # Load current event file
+  temp_event_file        <- read.table(event_files[i], header = FALSE, sep = "\t")
+  temp_event_file$V3     <- NULL # Remove the third column
+  names(temp_event_file) <- c("onset", "duration")
+  
+  # Split the file path to get information
+  event_file_path_split   <- str_split_1(event_files[i], pattern = "/")
+  temp_event_file$subject <- event_file_path_split[3]
+  temp_event_file$run     <- event_file_path_split[5]
+  
+  # To extract the level of the event extract "lvl" plus an integer from string
+  temp_event_file$lvl     <- str_extract(event_file_path_split[7], "lvl[0-9]+")
+  
+  # Add to list
+  event_list[[i]] <- temp_event_file
+}
+
+# Combine to data frame
+event_df <- as.data.frame(rbindlist(event_list))
+
+# Calculate offset
+event_df$offset <- event_df$onset + event_df$duration
+
+# Convert lvl label to number
+event_df$lvl_num <- as.numeric(str_extract(event_df$lvl, "[0-9]+"))
+
+# Change run label
+event_df$run <- ifelse(event_df$run == "run-01", "Run 1", "Run 2")
+
+
+# Get the range of the values to get the axis limits
+axis_x <- calc_axis_limits(event_df$duration, 0)
+
+
+# Create a box plot 
+event_duration_plot <- ggplot(event_df, aes(x = duration)) + 
+  geom_density(fill = baseColours[1], size = 0.2) + 
+  geom_jitter(aes(y = -0.1), height = 0.05, 
+              size = 0.1, width = 0, colour = boxplot_pointColour, alpha = 0.1) +
+  labs(y = "Density", x = "Event duration (s)", title = "") +
+  scale_x_continuous(breaks = axis_x$breaks) + 
+  coord_cartesian(xlim = axis_x$limits, 
+                  expand = FALSE, ylim = c(-0.1*2, 0.8)) +
+  base_theme +
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        plot.margin = unit(c(1, 2.5, 1, 2.5), "mm"))
+```
+
+
+
+
+#### Histograms of heading angles
+```{r secotrs_and_views}
+# Set seed
+set.seed(20241123)
+
+# SD if data was perfectly uniform
+perfectUni_sd <- sd(runif(9999999, min = 0, max = 359.9999))
+
+# Calculate SD for each sector
+sector_rotation <- ddply(no_control, c("sector"), summarise, 
+                         rot_y_sd = sd(rot_y))
+
+# Create bins like it is done in voronoi_tessellation_grid_binning_2d
+# This is code directly from that function to get the coordinates of each sector
+xLim    <- sort(limValues)
+yLim    <- sort(limValues)
+byValue <- ((xLim[2] - xLim[1])/(numSeeds - 1))
+xRange  <- seq(from = xLim[1], to = xLim[2], by = byValue)
+xStepSize <- xRange[2] - xRange[1]
+x_shiftValue <- xStepSize/4
+yRange <- seq(from = yLim[1], to = yLim[2], by = xStepSize * (sqrt(3)/2))
+yRange <- yRange[1:length(xRange)]
+yRange <- yRange + (yLim[2] - max(yRange))/2
+seeds <- data.frame(x = xRange[1], y = yRange)
+shiftIndex <- rep(c(1, -1), length.out = nrow(seeds))
+seeds$x <- seeds$x + shiftIndex * x_shiftValue
+for(i in 2:length(xRange)){
+  seeds <- rbind(seeds, data.frame(x = xRange[i] + shiftIndex * x_shiftValue, y = yRange))
+}
+seeds$sector <- row.names(seeds)
+
+# Add x & y coordinates to sector_rotation For this just loop the df
+sector_rotation$x <- NA
+sector_rotation$y <- NA
+for(i in 1:nrow(sector_rotation)){
+  # Get current sector
+  currentSector <- sector_rotation$sector[i]
+  
+  # Get corresponding row index in seeds
+  rowID <- which(seeds$sector == currentSector)
+  
+  # Assign the correct coordinates based on rowID
+  sector_rotation$x[i] <- seeds$x[rowID]
+  sector_rotation$y[i] <- seeds$y[rowID]
+}
+
+
+# Get the range of the values to get the axis limits
+axis_x <- calc_axis_limits(round(sector_rotation$rot_y_sd, 2), 0)
+axis_y <- calc_axis_limits(c(0, 7.6), 0)
+
+# Visualise SDs for all sectors
+heading_angle_plot <- ggplot(sector_rotation, aes(x = rot_y_sd)) +
+  geom_histogram(colour = baseColours[1], fill = baseColours[1]) + 
+  geom_vline(xintercept = perfectUni_sd, colour = "black", linetype = 2, size = 0.5) +
+  scale_x_continuous(breaks = axis_x$breaks) + 
+  scale_y_continuous(breaks = round(axis_y$breaks)) + 
+  coord_cartesian(xlim = axis_x$limits, 
+                  ylim = round(axis_y$limits), 
+                  expand = FALSE) +
+  labs(x = "sd(heading angle)", y = "Count") +
+  base_theme +
+  theme(plot.margin = unit(c(1, 2.5, 1, 2.5), "mm"))
+```
+
+#### Box plot of the locomotion states
+Calculate overall time spent on translation, rotation and being stationary:
+
+```{r locomotion1}
+# The amount we found the values to avoid false positive
+rotation_round  <- 2 # round rotation values to this decimal point
+
+# Function to determine which state a time point belongs to
+what_state <- function(rot_y, moving2){
+  # Get angles 
+  angle1 <- rot_y[2:length(rot_y)]
+  angle2 <- rot_y[1:(length(rot_y)-1)]
+  
+  # Calculate the amount was rotated between the time points and then rotate
+  rotated <- c(NA, round(angularDifference(angle1, angle2), rotation_round))
+  
+  # If rotation is zero called it stationary, otherwise rotation
+  tra_rot_sta <- ifelse(abs(rotated) == 0 | is.na(rotated), 
+                        'stationary', 'rotation') 
+  
+  # Set time point to translation based the information saved by unity
+  tra_rot_sta[moving2] <- 'translation'
+  
+  # Return
+  return(tra_rot_sta)
+}
+
+# Convert moving to boolean
+pathData$moving2 <- ifelse(pathData$moving == "True", TRUE, FALSE)
+
+# Calculate the state for each time points for each subject and each trial
+pathData <- ddply(pathData, c("ppid", "trial"), 
+                  mutate, locomotion = what_state(rot_y, moving2))
+
+# Calculate the total percentage for each subject
+locomotion_per <- ddply(pathData, c("ppid"), summarise,
+                        translation = mean(locomotion == "translation"),
+                        rotation = mean(locomotion == "rotation"),
+                        stationary = mean(locomotion == "stationary"))
+
+# Convert from wide to long format
+locomotion_per_long  <- reshape2::melt(locomotion_per, id.vars = c("ppid"))
+
+# Convert proportions to percentage
+locomotion_per_long$value <- locomotion_per_long$value * 100
+
+# Plot showing percentage of locomotion
+## Create colours and axis limits
+currentColours <- colorRampPalette(c(baseColours[1], baseColours[2]))(3)
+axis_y <- calc_axis_limits(locomotion_per_long$value, axisExpand)
+
+## Create the plot
+locomotion_states_plot <- ggplot(locomotion_per_long, aes(x = variable, y = value, fill = variable)) +
+  geom_line(aes(group = ppid), size = 0.05) +
+  geom_point(size = 0.1, colour = boxplot_pointColour) +
+  geom_boxplot(colour = boxplot_borderColour, 
+               outlier.shape = NA, width = 0.4, 
+               size = 0.2, alpha = 0.7) +
+  scale_fill_manual(values = currentColours) +
+  base_theme + 
+  scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  scale_y_continuous(breaks = axis_y$breaks) + 
+  coord_cartesian(xlim = c(0.5, 3.5), 
+                  ylim = axis_y$limits, expand = FALSE) +
+  theme(legend.position = "none", plot.margin = unit(c(1, 2, 1, 2), "mm")) +
+  labs(title = "", x = "Locomotion", y = "Percentage")
+```
+
+#### Novelty score over time model plot
+```{r noveltyScore_model_plot}
+# Load the models
+load("fitted_brms_models/SpaNov_contPM_smo6_m_noveltyScore.Rdata")
+
+# Background: https://www.andrewheiss.com/blog/2022/11/29/conditional-marginal-marginaleffects/
+# Also: https://discourse.mc-stan.org/t/random-slopes-with-posterior-linpred/8004
+
+# Get all subjects
+subjects   <- unique(m_noveltyScore_run1$data$subject)
+x1_range   <- c(-1, 2) # Extent range a bit to look better range(m_noveltyScore_run1$data$s_onset_rel) = -0.9748797  1.8069553
+x1_points  <- seq(from = x1_range[1], to = x1_range[2], length.out = 10)
+x2_range   <- c(-1, 1.5) # Extent range a bit to look better range(m_noveltyScore_run2$data$s_onset_rel) = -0.8343619  1.3502976
+x2_points  <- seq(from = x2_range[1], to = x2_range[2], length.out = 10)
+pred1_list <- list()
+pred2_list <- list()
+
+# Loop through all subjects
+for(i in 1:length(subjects)){
+  # Run 1
+  ## Get prediction for this subject
+  subj_pred <- predictions(m_noveltyScore_run1, 
+                           newdata = datagrid(s_onset_rel = x1_points, subject = subjects[i]), 
+                           by = "s_onset_rel", re_formula = ~ (s_onset_rel | subject))
+  
+  ## Convert to data frame, add subject and get minimum value for later colouring
+  subj_pred         <- as.data.frame(subj_pred)
+  subj_pred$subject <- subjects[i]
+  subj_pred$min     <- min(subj_pred$estimate)
+  
+  ## Add to list 
+  pred1_list[[i]] <- subj_pred
+  
+  # Run 2
+  ## Get prediction for this subject
+  subj_pred <- predictions(m_noveltyScore_run2, 
+                           newdata = datagrid(s_onset_rel = x2_points, subject = subjects[i]), 
+                           by = "s_onset_rel", re_formula = ~ (s_onset_rel | subject))
+  
+  ## Convert to data frame, add subject and get minimum value for later colouring
+  subj_pred         <- as.data.frame(subj_pred)
+  subj_pred$subject <- subjects[i]
+  subj_pred$min     <- min(subj_pred$estimate)
+  
+  ## Add to list 
+  pred2_list[[i]] <- subj_pred
+}
+
+# Convert lists to data frames
+pred1_df <- rbindlist(pred1_list)
+pred1_df <- as.data.frame(pred1_df)
+pred2_df <- rbindlist(pred2_list)
+pred2_df <- as.data.frame(pred2_df)
+
+# Create plots
+## Run 1
+axis_x <- calc_axis_limits(c(-1, 2), 0)
+axis_y <- calc_axis_limits(c(-2, 0.6), 0)
+
+p1 <- ggplot(data = pred1_df, aes(x = s_onset_rel, y = estimate, group = subject, colour = min)) +
+  geom_line(size = 0.05) +
+  scale_color_viridis_c() + base_theme +
+  theme(legend.position = "none",
+        plot.margin = unit(c(1, 2, 1, 2), "mm")) +
+  labs(title = "Run 1", x = "Time (scaled)", y = "Novelty score") +
+  scale_x_continuous(breaks = axis_x$breaks) +
+  scale_y_continuous(breaks = axis_y$breaks) +
+  coord_cartesian(xlim = axis_x$limits, ylim = axis_y$limits,
+                  expand = FALSE) 
+
+## Run 2
+axis_x <- calc_axis_limits(c(-1, 1.5), 0)
+axis_y <- calc_axis_limits(c(-1.5, 0.5), 0)
+
+p2 <- ggplot(data = pred2_df, aes(x = s_onset_rel, y = estimate, group = subject, colour = min)) +
+  geom_line(size = 0.05) +
+  scale_color_viridis_c() + base_theme +
+  theme(legend.position = "none",
+        plot.margin = unit(c(1, 2, 1, 2), "mm")) +
+  labs(title = "Run 2", x = "Time (scaled)", y = "Novelty score") +
+  scale_x_continuous(breaks = axis_x$breaks) +
+  scale_y_continuous(breaks = axis_y$breaks) +
+  coord_cartesian(xlim = axis_x$limits, ylim = axis_y$limits,
+                  expand = FALSE) 
+
+# Combine and save
+novelty_score_model_plot <- plot_grid(p1, p2, ncol = 2)
+```
+
+#### Combine to one figure
+```{r Figure1_combined}
+# Combine
+Figure1_combined <- plot_grid(plot_grid(total_path_lengths_plot, event_duration_plot, heading_angle_plot, locomotion_states_plot, align = "h", nrow = 1),
+                              plot_grid(NULL, novelty_score_model_plot), align = "v", nrow = 2)
+# Save
+ggsave(Figure1_combined,
+       filename = paste0(figurePath, "Figure_1_lower_part.png"), 
+       dpi = 1000,
+       width = 170,
+       height = 85,
+       units = "mm")
+```
+
+![](figures/SpaNov/Figure_1_lower_part.png)
+
+
+### Descriptive statistics of exploration
+#### Mean and SD of sd(heading angles)
+```{r heading_angle_description}
+# Make report string
+val  <- sector_rotation$rot_y_sd
+str1 <- mean_SD_str2(val, report_type, digits1, rounding_type)
+```
+
+- Spread of heading direction in SD: `r str1`
+
+#### Calculating the number of visits per participant
+```{r num_visitedSectors}
+# Calculate the number of visited sectors
+num_visitedSectors <- ddply(no_control, c("ppid"), summarise, 
+                            number = length_uniq(sector))
+
+# Make report string
+val  <- num_visitedSectors$number
+str1 <- mean_SD_str2(val, report_type, digits1, rounding_type)
+```
+
+Number of visited sector per participant: `r str1`
+
+#### Describe two measures on which the novelty score is based
+```{r analyse_novelty_measures}
+# Convert list to data frame
+data <- as.data.frame(rbindlist(subj_list, idcol = "subject"))
+
+# Add subjects' R number
+data$ppid <- subjIDs_R[data$subject]
+
+# Function to match runStartTime
+find_runStartTime <- function(ppid, run){
+  # Get corresponding to find the run in the trial data
+  anonKey <- lookupTable$anonKey[lookupTable$Rnum == ppid[1]]
+  
+  # Use the anonKey & run to get runStartTime
+  bool_index  <- OLM_7T_trial_results$subject == anonKey & 
+                 OLM_7T_trial_results$block_num == run
+  runStartTime <- OLM_7T_trial_results$runStartTime[bool_index]
+  
+  return(runStartTime[1])
+}
+
+# Use the function to find the correct run start time
+data <- ddply(data, c("subject", "ppid", "run"), mutate, 
+              runStartTime = find_runStartTime(ppid, run))
+
+# Make time relative to the start of the run. The real onset times will be 
+# slightly different but this will not matter for this. 
+data$onset_rel <- data$onset - data$runStartTime
+
+# Add run type
+data$runType <- "encoding"
+data$runType[data$run == 2 | data$run == 4] <- "retrieval"
+
+# Subset to only encoding
+data_sub <- data[data$runType == "encoding", ]
+
+# Change run number to match the description in paper. Run 3 is Encoding Run 2
+data_sub$run[data_sub$run == 3] <- 2
+
+# Convert run to factor
+data_sub$f_run <- as.factor(data_sub$run)
+
+
+# Calculate descriptive stats for the measures
+data_sub_agg1 <- ddply(data_sub, c("subject"), summarise,
+                      max_visits = max(visits),
+                      min_lastVisit = min(lastVisit, na.rm = TRUE),
+                      max_lastVisit = max(lastVisit, na.rm = TRUE),
+                      median_lastVisit = median(lastVisit, na.rm = TRUE),
+                      mean_lastVisit = mean(lastVisit, na.rm = TRUE))
+
+# Calculate the average duration of events from lastVisits for that exclude NA values
+data_sub_agg2 <- ddply(na.omit(data_sub), c("subject"), summarise,
+                       mean_duration = mean(duration),
+                       median_duration = median(duration),
+                       min_duration = min(duration),
+                       max_duration = max(duration))
+
+# Create strings for report
+val  <- data_sub_agg1$max_visits
+str1 <- mean_SD_str2(val, report_type, digits1, rounding_type)
+val  <- data_sub_agg1$min_lastVisit
+str2 <- mean_SD_str2(val, report_type, digits1, rounding_type, "s")
+val  <- data_sub_agg1$max_lastVisit
+str3 <- mean_SD_str2(val, report_type, digits1, rounding_type, "s")
+val  <- data_sub_agg2$mean_duration
+str4 <- mean_SD_str2(val, report_type, digits1, rounding_type, "s")
+val  <- data_sub_agg2$min_duration
+str5 <- mean_SD_str2(val, report_type, digits1, rounding_type, "s")
+val  <- data_sub_agg2$max_duration
+str6 <- mean_SD_str2(val, report_type, digits1, rounding_type, "s")
+```
+
+- Maximum visit per sector for the participants was `r str1` by the time of the second run.
+- The minimum time between visits varied between participants `r str2`.
+- The maximum time between visits varied between participants `r str3`.
+- The average duration of the events for the time since varied between participants `r str4` with an average minimum of `r str5` and an average maximum of `r str6`. 
+
+#### Locomotion during exploration
+Report the average values for the three locomotion states
+
+```{r locomotion2}
+val  <- locomotion_per$translation * 100
+str1 <- mean_SD_str2(val, report_type, digits1, rounding_type, "%")
+val  <- locomotion_per$rotation  * 100
+str2 <- mean_SD_str2(val, report_type, digits1, rounding_type, "%")
+val  <- locomotion_per$stationary * 100
+str3 <- mean_SD_str2(val, report_type, digits1, rounding_type, "%")
+```
+
+- Translation: `r str1`
+- Rotation: `r str2`
+- Stationary: `r str3`
+
+#### Travelled path length
+```{r travalled_path_length_report}
+# Create the report string
+str1 <- mean_SD_str2(total_path_lengths$distance, 
+                     report_type, digits1, rounding_type, "vm")
+
+# Create .csv for group-level analysis
+write.csv(total_path_lengths, 
+          file = paste0(path2data, "SpaNov_pathLength_designMatrix_data.csv"), 
+          quote = FALSE, 
+          row.names = FALSE)
+```
+
+The average total path length was `r str1`
+
+#### Event duration
+```{r event_duration_report}
+# Make report string
+val  <- event_df$duration
+str1 <- mean_SD_str2(val, report_type, digits1, rounding_type)
+```
+
+Event duration: `r str1`
+
+#### Bayesian hierarchical modelling of novelty score
+```{r novety_score_model}
+# Create report strings
+str1 <- brms_fixef_report(fixef(m_noveltyScore_run1)[2,])
+str2 <- brms_fixef_report(fixef(m_noveltyScore_run2)[2,])
+```
+
+- Novelty score slope Run 1 : `r str1`
+- Novelty score slope Run 2 : `r str2`
+
+$$
+\begin{align*} 
+y & \sim \operatorname{Student}(\nu, \mu, \sigma) \\ 
+\mu & = time + (time | subject)  
+\end{align*} 
+$$
+
+Alternative way to describe: https://rpsychologist.com/r-guide-longitudinal-lme-lmer
+
+## Mapping spatial novelty across the hippocampal long axis
+Load the results from the linear contrast (Level 1 > Level 2 > Level 3 > ...). All xiis from this contrast start with GLM1. 
+
+- Positive values: Higher activity for familiar sectors (c1)
+- Negative values: Higher activity for novel sectors (c2)
+
+```{r Loading_GLM1}
+# Folder where the images are
+ciftiFolder <- "/SpaNov/OLMe_7T_SpaNov_gradient_6lvl_smo4_MSMAll/cope7.feat/stats/vwc/"
+
+# Other parameters
+minClusterSize   <- 20
+
+# Choose the files
+zMap_file        <- paste0(path2imaging_results2, ciftiFolder, "results_lvl2cope1_dat_ztstat_c1.dscalar.nii")
+pMap1_file       <- paste0(path2imaging_results2, ciftiFolder, "results_lvl2cope1_dat_ztstat_cfdrp_c1.dscalar.nii")
+pMap2_file       <- paste0(path2imaging_results2, ciftiFolder, "results_lvl2cope1_dat_ztstat_cfdrp_c2.dscalar.nii")
+clusterMap1_file <- paste0(path2imaging_results2, ciftiFolder, "results_lvl2cope1_dat_ztstat_cfdrp_c1_clusters.dscalar.nii")
+clusterMap2_file <- paste0(path2imaging_results2, ciftiFolder, "results_lvl2cope1_dat_ztstat_cfdrp_c2_clusters.dscalar.nii")
+betaMap_file     <- paste0(path2imaging_results2, ciftiFolder, "Y1.dtseries.nii")
+
+# Load all maps as xiis
+GLM1_zMap_xii <- read_cifti(zMap_file, brainstructures = "all", 
+                            surfL_fname = surfLeft, 
+                            surfR_fname = surfRight)
+GLM1_pMap1_xii <- read_cifti(pMap1_file, brainstructures = "all", 
+                            surfL_fname = surfLeft, 
+                            surfR_fname = surfRight)
+GLM1_pMap2_xii <- read_cifti(pMap2_file, brainstructures = "all", 
+                            surfL_fname = surfLeft, 
+                            surfR_fname = surfRight)
+GLM1_clusterMap1_xii <- read_cifti(clusterMap1_file, brainstructures = "all", 
+                            surfL_fname = surfLeft, 
+                            surfR_fname = surfRight)
+GLM1_clusterMap2_xii <- read_cifti(clusterMap2_file, brainstructures = "all", 
+                            surfL_fname = surfLeft, 
+                            surfR_fname = surfRight)
+GLM1_betaMap_xii <- read_cifti(betaMap_file, brainstructures = "all", 
+                            surfL_fname = surfLeft, 
+                            surfR_fname = surfRight)
+
+# Create cluster tables based on the maps
+GLM1_cluster1 <- cifti_cluster_report(zMap_file, 
+                            clusterMap1_file, 
+                            surfLeft, 
+                            surfRight,
+                            parcellationFile, 
+                            minClusterSize,
+                            FALSE)
+
+GLM1_cluster2 <- cifti_cluster_report(zMap_file, 
+                            clusterMap2_file, 
+                            surfLeft, 
+                            surfRight,
+                            parcellationFile, 
+                            minClusterSize,
+                            FALSE)
+
+# Round values to in order to report them
+GLM1_cluster1$cluster_values$zValue_max   <- signif(GLM1_cluster1$cluster_values$zValue_max, digits1)
+GLM1_cluster1$cluster_values$zValue_min   <- signif(GLM1_cluster1$cluster_values$zValue_min, digits1)
+GLM1_cluster1$cluster_values$cluster_mass <- signif(GLM1_cluster1$cluster_values$cluster_mass, digits1)
+
+GLM1_cluster2$cluster_values$zValue_max   <- signif(GLM1_cluster2$cluster_values$zValue_max, digits1)
+GLM1_cluster2$cluster_values$zValue_min   <- signif(GLM1_cluster2$cluster_values$zValue_min, digits1)
+GLM1_cluster2$cluster_values$cluster_mass <- signif(GLM1_cluster2$cluster_values$cluster_mass, digits1)
+
+# Write tsv files so it's easier to edit
+## Positive clusters
+### Combine to one table
+region_labels  <- GLM1_cluster1$cluster_labels[, 4]
+combined_table <- cbind(GLM1_cluster1$cluster_values, region_labels)
+
+### Add places between the region labels
+combined_table$region_labels <- str_replace_all(combined_table$region_labels, 
+                                                pattern = ",",
+                                                replacement = ", ")
+
+### Write as .txt file
+write.table(combined_table, file = "figures/SpaNov/tables/GLM1_c1.txt", 
+            quote = FALSE,
+            row.names = FALSE,
+            sep = '\t')
+
+## Negative clusters
+### Combine to one table
+region_labels  <- GLM1_cluster2$cluster_labels[, 4]
+combined_table <- cbind(GLM1_cluster2$cluster_values, region_labels)
+
+### Add places between the region labels
+combined_table$region_labels <- str_replace_all(combined_table$region_labels, 
+                                                pattern = ",",
+                                                replacement = ", ")
+
+### Write as .txt file
+write.table(combined_table, file = "figures/SpaNov/tables/GLM1_c2.txt", 
+            quote = FALSE,
+            row.names = FALSE,
+            sep = '\t')
+```
+
+
+#### Z-statistic over MNI
+```{r z_over_MNI}
+# Create subset and indices
+## Get only the MNI coordinates from the hippocampus
+HC_data_left      <- MNI_coord[str_starts(MNI_coord$region, pattern = "Hippocampus-L"), ]
+HC_data_right     <- MNI_coord[str_starts(MNI_coord$region, pattern = "Hippocampus-R"), ]
+
+## Get the indices for the left and the right hippocampus
+index_bool_right  <- str_starts(GLM1_zMap_xii$meta$subcort$labels, pattern = "Hippocampus-R")
+index_bool_left   <- str_starts(GLM1_zMap_xii$meta$subcort$labels, pattern = "Hippocampus-L")
+
+## Split the projected HC into left and right
+projected_HC_L <- projected_HC[projected_HC$region == "Hippocampus-L", ]
+projected_HC_R <- projected_HC[projected_HC$region == "Hippocampus-R", ]
+
+# Add the z-statistic to the HC data as well as the projected position value
+## Left hippocampus
+### Prepare temporary df
+values <- GLM1_zMap_xii$data$subcort[index_bool_left, ]
+tempDF <- cbind(HC_data_left, data.frame(z_stat = values, Hemisphere = "left"))
+tempDF$position <- NA
+
+### Add projected position
+for(i in 1:nrow(projected_HC_L)){
+  # Get the values for the projection
+  y <- projected_HC_L$y[i]
+  z <- projected_HC_L$z[i]
+  pos <- projected_HC_L$position[i]
+  
+  # Add position values
+  tempDF[tempDF$y == y & tempDF$z == z, "position"] <- pos
+}
+
+## Re-name the df
+GLM1_zMap_xii_HC <- tempDF
+
+## Right hippocampus
+### Prepare temporary df
+values <- GLM1_zMap_xii$data$subcort[index_bool_right, ]
+tempDF <- cbind(HC_data_right, data.frame(z_stat = values, Hemisphere = "right"))
+tempDF$position <- NA
+
+### Add projected position
+for(i in 1:nrow(projected_HC_R)){
+  # Get the values for the projection
+  y <- projected_HC_R$y[i]
+  z <- projected_HC_R$z[i]
+  pos <- projected_HC_R$position[i]
+  
+  # Add position values
+  tempDF[tempDF$y == y & tempDF$z == z, "position"] <- pos
+}
+
+### Concatenate with df
+GLM1_zMap_xii_HC <- rbind(GLM1_zMap_xii_HC, tempDF)
+
+# Calculate the average z-statistic for each y-coordinate
+GLM1_zMap_xii_HC_agg <- ddply(GLM1_zMap_xii_HC, c("Hemisphere", "y"), summarise,
+                              z_stat = mean(z_stat))
+
+# Create the plot
+p1 <- ggplot(GLM1_zMap_xii_HC_agg, aes(x = y, y = z_stat, colour = Hemisphere)) + 
+  geom_line(size = 0.5) + 
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(x = "MNI y coordinate", y = "Average z-statistic") +
+  scale_colour_manual(values = baseColours) +
+  base_theme +
+  theme(legend.position = "none")
+```
+
+
+.
+
+#### Create unthresholded hippocampal z-map
+For unthresholded visualisation of the hippocampal GLM results, we create a version of the z-map that set everything other than the hippocampus to zero. 
+
+```{r create_HC_only_zMaps, eval = FALSE}
+# (This chunk only needs to run once, so eval is set to FALSE)
+# Extreme comparison: Level 1 vs. Level 6
+ciftiFolder <- "/SpaNov/OLMe_7T_SpaNov_gradient_6lvl_smo4_MSMAll/cope14.feat/stats/vwc/"
+zMap_file1  <- paste0(path2imaging_results2, ciftiFolder, "results_lvl2cope1_dat_ztstat_c1.dscalar.nii")
+zMap_xii1   <- read_cifti(zMap_file1, brainstructures = "all", 
+                  surfL_fname = surfLeft, surfR_fname = surfRight)
+
+# Linear contrast from Level 1 to Level 6
+ciftiFolder <- "/SpaNov/OLMe_7T_SpaNov_gradient_6lvl_smo4_MSMAll/cope7.feat/stats/vwc/"
+zMap_file2  <- paste0(path2imaging_results2, ciftiFolder, "results_lvl2cope1_dat_ztstat_c1.dscalar.nii")
+zMap_xii2   <- read_cifti(zMap_file2, brainstructures = "all", 
+                  surfL_fname = surfLeft, surfR_fname = surfRight)
+
+# Create mask for everything other than right and left hippocampus
+currentMask <- zMap_xii1$meta$subcort$labels != "Hippocampus-R" & 
+               zMap_xii1$meta$subcort$labels != "Hippocampus-L"
+
+# Create new variables
+zMap_xii1_HC <- zMap_xii1
+zMap_xii2_HC <- zMap_xii2
+
+# Set everything within this mask to zero
+zMap_xii1_HC$data$subcort[currentMask, ] <- 0
+zMap_xii2_HC$data$subcort[currentMask, ] <- 0
+
+# Also set cortical values to zero
+zMap_xii1_HC$data$cortex_left  <- matrix(as.integer(0), nrow = 29696, ncol = 1)
+zMap_xii1_HC$data$cortex_right <- matrix(as.integer(0), nrow = 29716, ncol = 1)
+zMap_xii2_HC$data$cortex_left  <- matrix(as.integer(0), nrow = 29696, ncol = 1)
+zMap_xii2_HC$data$cortex_right <- matrix(as.integer(0), nrow = 29716, ncol = 1)
+
+# Create new names
+new_zMap_file1 <- str_replace(zMap_file1, pattern = ".dscalar.nii", 
+                              replacement = "_onlyHC.dscalar.nii")
+new_zMap_file2 <- str_replace(zMap_file2, pattern = ".dscalar.nii", 
+                              replacement = "_onlyHC.dscalar.nii")
+
+# Write new cifti files
+write_cifti(xifti = zMap_xii1_HC, cifti_fname = new_zMap_file1)
+write_cifti(xifti = zMap_xii2_HC, cifti_fname = new_zMap_file2)
+```
+
+### Spatial novelty-gradient in hippocampus
+#### Figure 2
+```{r HC_grad}
+# Load hippocampal gradient data
+load("intermediate_data/SpaNov_gradient_data.RData")
+
+# Average across the MNI_y axis
+HC_data_agg_pos <- ddply(HC_data, c("position", "Hemisphere"), summarise, n = length(min), min = mean(min), max = mean(max))
+
+# Labels
+conN       <- 6
+novLabels  <- paste0('Level ', 1:conN)
+
+# Create new data frame just for plotting
+HC_data_plotting <- HC_data_agg_pos
+HC_data_plotting$Hemisphere2 <- ifelse(HC_data_plotting$Hemisphere == "right",
+                                       "Right hippocampus", "Left hippocampus")
+
+# Create plots
+scatter_min <- ggplot(HC_data_plotting, aes(x = -position, y = min)) + 
+  facet_grid(~Hemisphere2, scales = "free_x") + 
+  geom_point(aes(colour = min), size = 0.5) +
+  geom_smooth(method = "lm", formula = y ~ x , size = 0.5, colour = "black") +
+  labs(x = "Distance to most anterior part (mm)", y = "Novelty Preference\n(min. z-stat)") + 
+  scale_x_continuous(breaks = c(-45, 0), labels = c("45", "0")) +
+  scale_y_continuous(breaks = 1:6, labels = novLabels, limits = c(1, 6)) +
+  scale_colour_viridis_c(option = "H", limits = c(1, 6), direction = -1) +
+  base_theme2 +
+  theme(legend.position = "none")
+
+scatter_max <- ggplot(HC_data_plotting, aes(x = -position, y = max)) + 
+  facet_grid(~Hemisphere2, scales = "free_x") + 
+  geom_point(aes(colour = max), size = 0.5) +
+  geom_smooth(method = "lm", formula = y ~ x , size = 0.5, colour = "black") +
+  scale_x_continuous(breaks = c(-45, 0), labels = c("45", "0")) +
+  labs(x = "Distance to most anterior part (mm)", y = "Novelty Preference\n(max. z-stat)") + 
+  scale_y_continuous(breaks = 1:6, labels = novLabels, limits = c(1, 6)) +
+  scale_colour_viridis_c(option = "H", limits = c(1, 6), direction = -1) +
+  base_theme2 +
+  theme(legend.position = "none")
+
+# Combine figure and save
+# Hemisphere-specific slopes
+hemisphere_slopes <- plot_grid(scatter_min, scatter_max, ncol = 1)
+
+# Dimensions 92 mm x 80 mm
+ggsave(hemisphere_slopes,
+       filename = paste0(figurePath, "Figure_2c_scatter_plot.png"),
+       dpi = dpi,
+       width = 92,
+       height = 80,
+       units = "mm")
+
+# Average across the MNI_y axis and hemisphere
+HC_data_agg_pos2 <- ddply(HC_data, c("position"), summarise, n = length(min), min = mean(min), max = mean(max))
+
+# Create plots
+scatter_min2 <- ggplot(HC_data_agg_pos2, aes(x = -position, y = min)) + 
+  geom_point(aes(colour = min), size = 0.5) +
+  geom_smooth(method = "lm", formula = y ~ x , size = 0.5, colour = "black") +
+  labs(x = "Distance to most anterior part (mm)", y = "Novelty Preference\n(min. z-stat)") + 
+  scale_x_continuous(breaks = c(-45, 0), labels = c("45", "0")) +
+  scale_y_continuous(breaks = 1:6, labels = novLabels, limits = c(1, 6)) +
+  scale_colour_viridis_c(option = "H", limits = c(1, 6), direction = -1) +
+  base_theme2 +
+  theme(legend.position = "none")
+
+scatter_max2 <- ggplot(HC_data_agg_pos2, aes(x = -position, y = max)) + 
+  geom_point(aes(colour = max), size = 0.5) +
+  geom_smooth(method = "lm", formula = y ~ x , size = 0.5, colour = "black") +
+  scale_x_continuous(breaks = c(-45, 0), labels = c("45", "0")) +
+  labs(x = "Distance to most anterior part (mm)", y = "Novelty Preference\n(max. z-stat)") + 
+  scale_y_continuous(breaks = 1:6, labels = novLabels, limits = c(1, 6)) +
+  scale_colour_viridis_c(option = "H", limits = c(1, 6), direction = -1) +
+  base_theme2 +
+  theme(legend.position = "none")
+
+# Combine figure and save
+# Hemisphere-specific slopes
+slopes <- plot_grid(scatter_min2, scatter_max2, ncol = 1)
+
+# Dimensions 92 mm x 80 mm
+ggsave(slopes,
+       filename = paste0(figurePath, "Figure_2c_scatter_plot2.png"),
+       dpi = dpi,
+       width = 92/1.5,
+       height = 80,
+       units = "mm")
+```
+
+![](figures/SpaNov/Figure_2c_scatter_plot.png)
+
+
+#### Permutation analyses
+```{r permutation_function}
+permutation_analysis <- function(data, lm_formula, nIter, colName, imageName){
+  # Initialise results list
+  results <- list()
+  
+  # Select correct column for analysis and create new data frame
+  data$val     <- data[, colName]
+  data2shuffle <- data
+  
+  # Calculate empirical values and save to list
+  results$lm <- lm(lm_formula, data = data)
+  numCoef    <- length(results$lm$coefficients) - 1 # Ignoring the intercept
+  
+  # Start cluster
+  my.cluster <- parallel::makeCluster(detectCores() - 2, type = "PSOCK")
+  
+  #register it to be used by %dopar%
+  doParallel::registerDoParallel(cl = my.cluster)
+  
+  # Run parallel loop
+  permuted_values <- foreach(i = 1:nIter, .combine = 'c', .packages = 'plyr') %dopar% {
+    data2shuffle$val <- sample(data$val)
+    
+    # Fit model
+    temp_lm <- lm(lm_formula, data = data2shuffle)
+    
+    # Add values 
+    temp_est <- as.data.frame(matrix(as.numeric(temp_lm$coefficients)[-1], ncol = numCoef))
+    names(temp_est) <- names(results$lm$coefficients)[-1]
+    list(temp_est)
+  }
+  
+  # Stop cluster again
+  parallel::stopCluster(cl = my.cluster) 
+  
+  # Add to results
+  results$permuted_values <- as.data.frame(rbindlist(permuted_values))
+  
+  # Save to disk
+  if(!missing(imageName)){
+    save(results, file = paste0("intermediate_data/", imageName))
+  }
+  
+  # Return value
+  return(results)
+}
+```
+
+##### Minimum
+```{r grad_min_run_check1}
+# Rename to be unique
+grad_HC1 <- HC_data_agg_pos
+
+# Check if the code needs to be run again. This is done by checking the md5 has for the data frame that is used in the calculation if it is different from the hash sum saved in md5_hash_table.csv, it is re-run. This is to avoid having to re-run everything each time I work on the data. 
+runCodeAgain1 <- check_if_md5_hash_changed(grad_HC1, hash_table_name = "SpaNov_md5_hash_table.csv")
+```
+
+###### Model with interaction with hemisphere
+```{r HC_grad_min_permute_with_interaction}
+# Seed
+set.seed(19911225)
+
+# Other input
+lm_formula    <- "val ~ position * Hemisphere"
+nIter         <- 100000
+colName       <- "min"
+imageName    <- "SpaNov_permut_HC_grad_analysis1.RData"
+
+# Run if necessary
+if(runCodeAgain1){
+  grad_min_permut1 <- permutation_analysis(grad_HC1, lm_formula, 
+                                       nIter, colName, imageName)
+} else {
+  load(paste0("intermediate_data/", imageName))
+  grad_min_permut1 <- results
+}
+```
+
+```{r HC_grad_min_permute_with_interaction_results}
+# Select values for plotting
+dist              <- grad_min_permut1$permuted_values[,3]
+critVal           <- grad_min_permut1$lm$coefficients[4]
+grad_min_permut1_p2 <- pValue_from_nullDist(critVal, dist, "two.sided")
+
+# Get axis
+axis_x <- calc_axis_limits(dist, axisExpand, digits = digits1, "round")
+
+# Create the plot
+interaction_min <- ggplot(data.frame(x = dist), aes(x = x)) + 
+  geom_histogram(bins = 100, colour = baseColours[1], fill = baseColours[1]) + 
+  geom_vline(xintercept = critVal, colour = "#ff3300", linetype = 2, linewidth = 0.5) +
+  labs(title = "Interaction (min.)", x = "Parameter estimate", y = "Count") +
+  scale_x_continuous(breaks = axis_x$breaks) + 
+  coord_cartesian(xlim = axis_x$limits, 
+                  expand = FALSE) +
+  base_theme +
+  theme(plot.margin = unit(c(0, 2.5, 0, 0), "mm"))
+```
+
+###### Average across hemispheres
+```{r HC_grad_min_permute_avg_across_hemisphere}
+# Rename to be unique
+grad_HC2 <- HC_data_agg_pos2
+
+# Check if the code needs to be run again. This is done by checking the md5 has for the data frame that is used in the calculation if it is different from the hash sum saved in md5_hash_table.csv, it is re-run. This is to avoid having to re-run everything each time I work on the data. 
+runCodeAgain2 <- check_if_md5_hash_changed(grad_HC2, hash_table_name = "SpaNov_md5_hash_table.csv")
+```
+
+```{r grad_min_permute1_avg}
+# Seed
+set.seed(20250319)
+
+# Other input
+lm_formula    <- "val ~ position"
+nIter         <- 100000
+colName       <- "min"
+imageName    <- "SpaNov_permut_HC_grad_analysis2.RData"
+
+# Run if necessary
+if(runCodeAgain2){
+  grad_min_permut1_avg <- permutation_analysis(grad_HC2, lm_formula, 
+                                       nIter, colName, imageName)
+} else {
+  load(paste0("intermediate_data/", imageName))
+  grad_min_permut1_avg <- results
+}
+```
+
+```{r grad_min_permute1_results}
+# Select values for plotting
+dist              <- grad_min_permut1_avg$permuted_values[,1]
+critVal           <- grad_min_permut1_avg$lm$coefficients[2]
+grad_min_permut1_avg_p1 <- pValue_from_nullDist(critVal, dist, "two.sided")
+
+# # Create the plot
+p1 <- ggplot(data.frame(x = dist), aes(x = x)) +
+  geom_histogram(bins = 100, colour = baseColours[1], fill = baseColours[1]) +
+  geom_vline(xintercept = critVal, colour = "#ff3300", linetype = 2) +
+  labs(title = "Effect of position", x = "Parameter estimate", y = "Count") +
+  theme_classic()
+```
+
+##### Maximum
+###### Model with interaction with hemisphere
+```{r grad_max_permute1}
+# Seed
+set.seed(19911225)
+
+# Other input
+lm_formula    <- "val ~ position * Hemisphere"
+nIter         <- 100000
+colName       <- "max"
+imageName    <- "SpaNov_permut_HC_grad_analysis3.RData"
+
+# Run if necessary
+if(runCodeAgain1){
+  grad_max_permut1 <- permutation_analysis(grad_HC1, lm_formula, 
+                                       nIter, colName, imageName)
+} else {
+  load(paste0("intermediate_data/", imageName))
+  grad_max_permut1 <- results
+}
+```
+
+```{r grad_max_permutep1_results}
+# Select values for plotting
+dist              <- grad_max_permut1$permuted_values[,3]
+critVal           <- grad_max_permut1$lm$coefficients[4]
+grad_max_permut1_p2 <- pValue_from_nullDist(critVal, dist, "two.sided")
+
+# Get axis
+axis_x <- calc_axis_limits(dist, axisExpand, digits = digits1, "round")
+
+# Create the plot
+interaction_max <- ggplot(data.frame(x = dist), aes(x = x)) + 
+  geom_histogram(bins = 100, colour = baseColours[1], fill = baseColours[1]) + 
+  geom_vline(xintercept = critVal, colour = "#ff3300", linetype = 2, linewidth = 0.5) +
+  labs(title = "Interaction (max.)", x = "Parameter estimate", y = "Count") +
+  scale_x_continuous(breaks = axis_x$breaks) + 
+  coord_cartesian(xlim = axis_x$limits, expand = FALSE) +
+  base_theme +
+  theme(plot.margin = unit(c(0, 2.5, 0, 2.5), "mm"))
+```
+
+###### Average across hemispheres
+```{r grad_max_permute1_avg}
+# Seed
+set.seed(20131)
+
+# Other input
+lm_formula    <- "val ~ position"
+nIter         <- 100000
+colName       <- "max"
+imageName    <- "SpaNov_permut_HC_grad_analysis4.RData"
+
+# Run if necessary
+if(runCodeAgain2){
+  grad_max_permut1_avg <- permutation_analysis(grad_HC2, lm_formula, 
+                                       nIter, colName, imageName)
+} else {
+  load(paste0("intermediate_data/", imageName))
+  grad_max_permut1_avg <- results
+}
+```
+
+
+```{r grad_max_permute1_results}
+# Select values for plotting
+dist              <- grad_max_permut1_avg$permuted_values[,1]
+critVal           <- grad_max_permut1_avg$lm$coefficients[2]
+grad_max_permut1_avg_p1 <- pValue_from_nullDist(critVal, dist, "two.sided")
+
+# # Create the plot
+p2 <- ggplot(data.frame(x = dist), aes(x = x)) +
+  geom_histogram(bins = 100, colour = baseColours[1], fill = baseColours[1]) +
+  geom_vline(xintercept = critVal, colour = "#ff3300", linetype = 2) +
+  labs(title = "Effect of position", x = "Parameter estimate", y = "Count") +
+  theme_classic()
+```
+
+#### Report stat of permutation analysis
+```{r calculate_effect_sizes}
+summary(grad_min_permut1_avg$lm)
+eff_min <- eta_squared(car::Anova(grad_min_permut1_avg$lm, type = 2))
+kable(eff_min)
+
+summary(grad_max_permut1_avg$lm)
+eff_max <- eta_squared(car::Anova(grad_max_permut1_avg$lm, type = 2))
+kable(eff_max)
+```
+
+- Minimum: interaction p `r pValue(grad_min_permut1_p2)`, slope (avg. across hemispheres) p `r pValue(grad_min_permut1_avg_p1)` 
+- Maximum: interaction p `r pValue(grad_max_permut1_p2)`, slope (avg. across hemispheres) p `r pValue(grad_max_permut1_avg_p1)`
+
+## Extension of spatial novelty gradient to the posterior medial cortex
+### Figure 3
+#### Yeo 7 parcellation ridge plot
+```{r GLM1_Yeo7_ridges_plot}
+# Get the names of the networks (-1 to remove the first row that just contains ???)
+Yeo7_labels        <- Yeo7_xii$meta$cifti$labels$parcels[-1, ]
+Yeo7_labels$Region <- row.names(Yeo7_labels)
+row.names(Yeo7_labels)   <- NULL
+
+# Convert the RGB values to hexcodes
+Yeo7_labels$hexcol <- rgb(Yeo7_labels$Red, Yeo7_labels$Green, Yeo7_labels$Blue, 
+                          maxColorValue = 1)
+
+# Create basic data frame
+Yeo_zValues_df <- data.frame(zValue = c(GLM1_zMap_xii$data$cortex_left, GLM1_zMap_xii$data$cortex_right),
+                             Yeo7   = c(Yeo7_xii$data$cortex_left, Yeo7_xii$data$cortex_right))
+
+# Add network label
+Yeo_zValues_df$net_label <- NA
+for(i in 1:nrow(Yeo7_labels)){
+  # Select all rows in Yeo_zValues_df that have this key
+  bool_index <- Yeo_zValues_df$Yeo7 == Yeo7_labels$Key[i]
+  Yeo_zValues_df$net_label[bool_index] <- Yeo7_labels$Region[i]
+}
+
+# Find lowest z value that's significant
+## Get the p-values and the z-values
+GLM1_pValues1 <- get_all_points_from_xifti(GLM1_pMap1_xii)
+GLM1_pValues2 <- get_all_points_from_xifti(GLM1_pMap2_xii)
+GLM1_zValues  <- get_all_points_from_xifti(GLM1_zMap_xii)
+
+## Subset to only significant values
+GLM1_zValues1 <- GLM1_zValues[GLM1_pValues1 > cutOff]
+GLM1_zValues2 <- GLM1_zValues[GLM1_pValues2 > cutOff]
+
+# Exclude vertices that are not included in Yeo 7
+Yeo_zValues_df_sub <- Yeo_zValues_df[Yeo_zValues_df$Yeo7 != 0, ]
+
+# Order according to the mean of the network
+Yeo_zValues_df_agg <- ddply(Yeo_zValues_df_sub, c("net_label"), summarise, 
+                            avg_z = mean(zValue))
+
+## First order alphabetically so we can apply the same order to GLM1_Yeo7
+Yeo_zValues_df_agg <- Yeo_zValues_df_agg[order(as.character(Yeo_zValues_df_agg$net_label)), ]
+
+## Now order based on the mean
+mean_order         <- order(Yeo_zValues_df_agg$avg_z)
+Yeo_zValues_df_agg <- Yeo_zValues_df_agg[mean_order, ]
+
+# Order the colours in the same way
+Yeo7_labels <- Yeo7_labels[order(as.character(Yeo7_labels$Region)), ]
+Yeo7_labels <- Yeo7_labels[mean_order, ]
+
+# Add the full names
+Yeo7_labels$fullNames <- find_values_thru_matching(Yeo7_abbr, Yeo7_fullNames, Yeo7_labels$Region)
+
+# Make net_label a factor with the correct order
+Yeo_zValues_df_sub$net_label <- factor(Yeo_zValues_df_sub$net_label, 
+                                       levels = Yeo_zValues_df_agg$net_label,
+                                       labels = Yeo7_labels$fullNames,
+                                       ordered = TRUE)
+
+# Create plot
+p1 <- ggplot(Yeo_zValues_df_sub, aes(x = zValue, y = net_label, fill = net_label)) + 
+  geom_density_ridges(linewidth = 0.3) +
+  scale_fill_manual(values = Yeo7_labels$hexcol) +
+  geom_vline(xintercept = max(GLM1_zValues2), linetype = 2, linewidth = 0.3) +
+  geom_vline(xintercept = min(GLM1_zValues1), linetype = 2, linewidth = 0.3) +
+  base_theme + 
+  coord_cartesian(ylim = c(0.5, 8.5)) +
+  theme(legend.position = "none", plot.margin = unit(c(1,1,1,1), "mm")) +
+  labs(x = "z-statistic", y = "")
+
+ggsave(p1,
+       filename = paste0(figurePath, "Fig_3a_Yeo7_ridge.png"), 
+       dpi = dpi,
+       width = 60,
+       height = 30,
+       units = "mm")
+```
+
+#### Margulies' connectivity gradients
+```{r Margulies_gradients}
+# Load all 10 gradients from brainstat
+# Source: https://brainstat.readthedocs.io/en/master/index.html
+nGrad          <- 10
+prefix         <- "data/ignore_fMRI_version1/brainstat/Gradient_"
+
+# Get the medial walls from donour
+mwm_L <- Yeo7_xii$meta$cortex$medial_wall_mask$left
+mwm_R <- Yeo7_xii$meta$cortex$medial_wall_mask$right
+
+# Create data frame with 
+Margulies_grad        <- as.data.frame(matrix(NA, nrow = 59412, ncol = 10))
+names(Margulies_grad) <- paste0("Grad_", 1:10)
+
+# Loop through all gradients
+for(i in 1:nGrad){
+  # Create a new xifti by reading the gifti files
+  tmp_xii <- read_xifti2(cortexL = paste0(prefix, i, "_L.shape.gii"), 
+                                       surfL = surfLeft,
+                                       mwall_values = c(0),
+                                       cortexR = paste0(prefix, i, "_R.shape.gii"),
+                                       surfR = surfRight)
+  
+  # Use the medial wall values from donour and apply them to the loaded file. 
+  tmp_xii$data$cortex_left[!mwm_L]  <- NA
+  tmp_xii$data$cortex_right[!mwm_R] <- NA
+  tmp_xii <- move_to_mwall(tmp_xii, values = c(NA))
+  
+  # Add to prepared data frame
+  Margulies_grad[, i] <- c(tmp_xii$data$cortex_left, tmp_xii$data$cortex_right)
+}
+
+# Add Yeo 7 to the data frame
+Margulies_grad$Yeo7_name   <- Yeo_zValues_df$net_label
+
+# Remove the missing values
+Margulies_grad_sub <- Margulies_grad[!is.na(Margulies_grad$Yeo7_name), ]
+
+# Plot 
+p1 <- ggplot(Margulies_grad_sub, aes(x = Grad_2, y = Grad_1, colour = Yeo7_name)) + 
+  geom_point(alpha = 0.2, size = 0.3, shape = 16) +
+  theme_void() + 
+  theme(legend.position = "none") +
+  scale_colour_manual(values = Yeo7_colours)
+
+# Save file
+ggsave(p1,
+       filename = paste0(figurePath, "Fig_3a_Yeo7_Margulies_space.png"), 
+       dpi = dpi,
+       width = 30,
+       height = 30,
+       units = "mm")
+
+# Significant vertices for GLM1
+Margulies_grad$GLM_1_direction <- NA
+Margulies_grad$GLM_1_direction[c(GLM1_pMap1_xii$data$cortex_left, GLM1_pMap1_xii$data$cortex_right) > cutOff]  <- "Familiarity"
+Margulies_grad$GLM_1_direction[c(GLM1_pMap2_xii$data$cortex_left, GLM1_pMap2_xii$data$cortex_right) > cutOff]  <- "Novelty"
+
+# Create subset of only significant vertices
+Margulies_grad_sub <- Margulies_grad[!is.na(Margulies_grad$GLM_1_direction), ]
+
+# Plot 
+p1 <- ggplot(Margulies_grad_sub, aes(x = Grad_2, y = Grad_1, colour = GLM_1_direction)) + 
+  geom_point(alpha = 0.2, size = 0.3, shape = 16) +
+  theme_void() + 
+  scale_colour_manual(values = cool_warm_colours) + 
+  theme(legend.position = "none") 
+
+# Save file
+ggsave(p1,
+       filename = paste0(figurePath, "Fig_3a_NovFam_Margulies_space.png"), 
+       dpi = dpi,
+       width = 70,
+       height = 70,
+       units = "mm")
+```
+
+```{r predicting_effects_SVM}
+# Splitting the dataset into the Training set and Test set 
+# https://www.geeksforgeeks.org/classifying-data-using-support-vector-machinessvms-in-r/
+svm_df <-  data.frame(Grad_1 = Margulies_grad_sub$Grad_1,
+                      Grad_2 = Margulies_grad_sub$Grad_2,
+                      Modulation = ifelse(Margulies_grad_sub$GLM_1_direction == "Novelty", 1, 0))
+# Seed for this analysis
+set.seed(123) 
+
+# Split the data into training and test
+split        <- sample.split(svm_df$Modulation, SplitRatio = 0.75) 
+training_set <- subset(svm_df, split == TRUE) 
+test_set     <- subset(svm_df, split == FALSE) 
+
+# Feature scaling 
+training_set[-3] <- scale(training_set[-3]) 
+test_set[-3]     <- scale(test_set[-3]) 
+
+# Fitting SVM to the Training set 
+classifier <- svm(formula = Modulation ~ ., 
+                 data = training_set, 
+                 type = 'C-classification', 
+                 kernel = 'radial') 
+
+# Predicting the Test set results
+y_pred   <- predict(classifier, newdata = test_set[-3]) 
+cm       <- table(test_set[, 3], y_pred)/sum(table(test_set[, 3], y_pred))
+cm       <- round(cm *100, 2)
+accuracy <- mean(test_set[, 3] == y_pred)
+```
+
+The SVM-classification accuracy is `r round(accuracy*100, 2)`% for significant novelty vs. familiarity vertices in Margulies' et al. (2015) gradient space.
+
+## Resting-state connectivity between spatial novelty gradients in hippocampus and the posterior parietal cortex
+### Figure 4
+```{r FRSC_between_gradients}
+# Load FRSC data
+load("data/ignore_fMRI_version1/grad_FRSC/HC_2_cortex_FRSC_SpaNov_gradient.RData")
+
+# Colour values for the diagonals
+diagonal_colours <- c("#595959", "#f2f2f2")
+
+# Convert list to data frame
+FRSC_data <- rbindlist(HC_2_cortex_SpaNov_gradient)
+FRSC_data <- as.data.frame(FRSC_data)
+
+# Create column whether or not a pair is on the diagonal
+FRSC_data$diagonal <- ifelse(FRSC_data$gradient_level_cortex == FRSC_data$gradient_level_HC, "diagonal", "off-diagonal")
+
+# Create average heatmap
+## Calculate the average connectivity for the matrix
+FRSC_data_heatmap <- ddply(FRSC_data, c("hemisphere_cortex", "hemisphere_HC",
+                                        "gradient_level_cortex", "gradient_level_HC"),
+                          summarise, connectivity = mean(connectivity))
+
+# Convert "left" and "right" to L & R
+FRSC_data_heatmap$hemisphere_HC     <- ifelse(FRSC_data_heatmap$hemisphere_HC == "left", "L", "R")
+FRSC_data_heatmap$hemisphere_cortex <- ifelse(FRSC_data_heatmap$hemisphere_cortex == "left", "L", "R")
+
+# Create better labels for the facets
+FRSC_data_heatmap$hemisphere_HC     <- paste(FRSC_data_heatmap$hemisphere_HC, "HC")
+FRSC_data_heatmap$hemisphere_cortex <- paste(FRSC_data_heatmap$hemisphere_cortex, "PMC")
+
+# Create column whether or not a pair is on the diagonal
+FRSC_data$diagonal         <- ifelse(FRSC_data$gradient_level_cortex == FRSC_data$gradient_level_HC, "diagonal", "off-diagonal")
+FRSC_data_heatmap$diagonal <- ifelse(FRSC_data_heatmap$gradient_level_cortex == FRSC_data_heatmap$gradient_level_HC, "diagonal", "off-diagonal")
+
+# Create heatmap
+heatmap_data <- ggplot(FRSC_data_heatmap, aes(x = gradient_level_cortex, y = gradient_level_HC, fill = connectivity)) +
+  facet_grid(hemisphere_HC ~ hemisphere_cortex) +
+  geom_tile() +
+  scale_fill_viridis_c(breaks = c(0.010, 0.015, 0.020)) +
+  scale_x_continuous(breaks = 1:6) +
+  #scale_y_continuous(breaks = 1:6) +
+  coord_equal(expand = FALSE) +
+  base_theme +
+  theme(legend.position = "none",
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  labs(x = "Gradient in PMC", y = "Gradient in HC",
+       fill = "z(r)", title = "Resting-state data")
+
+# Create illustration for diagonal
+heatmap_illustration <- ggplot(FRSC_data_heatmap, aes(x = gradient_level_cortex, y = gradient_level_HC, fill = diagonal)) +
+  facet_grid(hemisphere_HC ~ hemisphere_cortex) +
+  geom_tile() +
+  scale_fill_manual(values = diagonal_colours) +
+  scale_x_continuous(breaks = 1:6) +
+  #scale_y_continuous(breaks = 1:6) +
+  coord_equal(expand = FALSE) +
+  base_theme +
+  theme(legend.position = "none",
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  labs(x = "Gradient in PMC", y = "Gradient in HC",
+       fill = "Diagonal", title = "Theorectial prediction")
+
+# Calculate average connectivity of the diagonals
+FRSC_data_diagonal <- ddply(FRSC_data,  c("subject", "hemisphere_cortex", "hemisphere_HC", "diagonal"),
+                            summarise, conn = mean(connectivity, na.rm = TRUE))
+
+# Correct for baseline difference to better visualise within-subject differences (i.e. removing the between-subject variability)
+# More information here: https://www.cogsci.nl/blog/tutorials/156-an-easy-way-to-create-graphs-with-within-subject-error-bars
+## Calculate grand-average across participants but for hemisphere combination separately
+FRSC_data_diagonal <- ddply(FRSC_data_diagonal,c("hemisphere_cortex", "hemisphere_HC"), 
+                           mutate, grand_avg_conn = mean(conn, na.rm = TRUE))
+## Calculate subject-average for each hemisphere combination separately. I.e. 
+## averaging the values for diagonal vs. off-diagonals
+FRSC_data_diagonal <- ddply(FRSC_data_diagonal,c("subject", "hemisphere_cortex", "hemisphere_HC"), 
+                           mutate, subj_avg_conn = mean(conn, na.rm = TRUE))
+
+## Baseline correct
+FRSC_data_diagonal$corrected_conn <- FRSC_data_diagonal$conn - FRSC_data_diagonal$subj_avg_conn + FRSC_data_diagonal$grand_avg_conn
+
+# Calculate the difference between diagonal and off-diagonal
+FRSC_data_diagonal <- ddply(FRSC_data_diagonal, c("subject", "hemisphere_cortex", "hemisphere_HC"),
+                            mutate, diff = conn[1] - conn[2], corrected_diff = corrected_conn[1] - corrected_conn[2])
+
+# Importantly the correction applied here leads to the same difference values
+
+# Create figure
+## L-HC & L-PMC
+### Subset
+data_sub <- FRSC_data_diagonal[FRSC_data_diagonal$hemisphere_HC == "left" & FRSC_data_diagonal$hemisphere_cortex == "left", ]
+data_sub1 <- data_sub[data_sub$diagonal == "diagonal", ]
+data_sub2 <- data_sub[data_sub$diagonal == "off-diagonal", ]
+
+## Create figure
+p1 <- ggplot(data_sub, aes(x = diagonal, y = corrected_conn)) +
+  geom_hline(yintercept = unique(data_sub$grand_avg_conn), linetype = "dashed", linewidth = 0.3) +
+  geom_point(aes(colour = diff), size = 0.5) +
+  geom_line(aes(group = subject, colour = diff), size = 0.5) +
+  geom_half_violin(data = data_sub1, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "l", fill = diagonal_colours[1], nudge = 0.15, size = 0.1, width = 0.5) +
+  geom_half_boxplot(data = data_sub1, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "l", fill = diagonal_colours[1], nudge = 0.12, width = 0.1, outlier.shape = NA, size = 0.1) +
+  geom_half_violin(data = data_sub2, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "r", fill = diagonal_colours[2], nudge = 0.15, size = 0.1, width = 0.5) +
+  geom_half_boxplot(data = data_sub2, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "r", fill = diagonal_colours[2], nudge = 0.12, width = 0.1, outlier.shape = NA, size = 0.1) +
+  scale_colour_viridis_c() +
+  scale_fill_manual(values = diagonal_colours) +
+  base_theme +
+  theme(legend.position = "none") +
+  labs(x = "", y = "Connectivity", title = "L-HC x L-PMC")
+
+## L-HC & R-PMC
+### Subset
+data_sub <- FRSC_data_diagonal[FRSC_data_diagonal$hemisphere_HC == "left" & FRSC_data_diagonal$hemisphere_cortex == "right", ]
+data_sub1 <- data_sub[data_sub$diagonal == "diagonal", ]
+data_sub2 <- data_sub[data_sub$diagonal == "off-diagonal", ]
+
+## Create figure
+p2 <- ggplot(data_sub, aes(x = diagonal, y = corrected_conn)) +
+  geom_hline(yintercept = unique(data_sub$grand_avg_conn), linetype = "dashed", linewidth = 0.3) +
+  geom_point(aes(colour = diff), size = 0.5) +
+  geom_line(aes(group = subject, colour = diff), size = 0.5) +
+  geom_half_violin(data = data_sub1, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "l", fill = diagonal_colours[1], nudge = 0.15, size = 0.1, width = 0.5) +
+  geom_half_boxplot(data = data_sub1, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "l", fill = diagonal_colours[1], nudge = 0.12, width = 0.1, outlier.shape = NA, size = 0.1) +
+  geom_half_violin(data = data_sub2, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "r", fill = diagonal_colours[2], nudge = 0.15, size = 0.1, width = 0.5) +
+  geom_half_boxplot(data = data_sub2, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "r", fill = diagonal_colours[2], nudge = 0.12, width = 0.1, outlier.shape = NA, size = 0.1) +
+  scale_colour_viridis_c() +
+  scale_fill_manual(values = diagonal_colours) +
+  base_theme +
+  theme(legend.position = "none") +
+  labs(x = "", y = "Connectivity", title = "L-HC x R-PMC")
+
+## R-HC & L-PMC
+### Subset
+data_sub <- FRSC_data_diagonal[FRSC_data_diagonal$hemisphere_HC == "right" & FRSC_data_diagonal$hemisphere_cortex == "left", ]
+data_sub1 <- data_sub[data_sub$diagonal == "diagonal", ]
+data_sub2 <- data_sub[data_sub$diagonal == "off-diagonal", ]
+
+## Create figure
+p3 <- ggplot(data_sub, aes(x = diagonal, y = corrected_conn)) +
+  geom_hline(yintercept = unique(data_sub$grand_avg_conn), linetype = "dashed", linewidth = 0.3) +
+  geom_point(aes(colour = diff), size = 0.5) +
+  geom_line(aes(group = subject, colour = diff), size = 0.5) +
+  geom_half_violin(data = data_sub1, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "l", fill = diagonal_colours[1], nudge = 0.15, size = 0.1, width = 0.5) +
+  geom_half_boxplot(data = data_sub1, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "l", fill = diagonal_colours[1], nudge = 0.12, width = 0.1, outlier.shape = NA, size = 0.1) +
+  geom_half_violin(data = data_sub2, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "r", fill = diagonal_colours[2], nudge = 0.15, size = 0.1, width = 0.5) +
+  geom_half_boxplot(data = data_sub2, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "r", fill = diagonal_colours[2], nudge = 0.12, width = 0.1, outlier.shape = NA, size = 0.1) +
+  scale_colour_viridis_c() +
+  scale_fill_manual(values = diagonal_colours) +
+  base_theme +
+  theme(legend.position = "none") +
+  labs(x = "", y = "Connectivity", title = "R-HC x L-PMC")
+
+
+## R-HC & R-PMC
+### Subset
+data_sub <- FRSC_data_diagonal[FRSC_data_diagonal$hemisphere_HC == "right" & FRSC_data_diagonal$hemisphere_cortex == "right", ]
+data_sub1 <- data_sub[data_sub$diagonal == "diagonal", ]
+data_sub2 <- data_sub[data_sub$diagonal == "off-diagonal", ]
+
+## Create figure
+p4 <- ggplot(data_sub, aes(x = diagonal, y = corrected_conn)) +
+  geom_hline(yintercept = unique(data_sub$grand_avg_conn), linetype = "dashed", linewidth = 0.3) +
+  geom_point(aes(colour = diff), size = 0.5) +
+  geom_line(aes(group = subject, colour = diff), size = 0.5) +
+  geom_half_violin(data = data_sub1, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "l", fill = diagonal_colours[1], nudge = 0.15, size = 0.1, width = 0.5) +
+  geom_half_boxplot(data = data_sub1, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "l", fill = diagonal_colours[1], nudge = 0.12, width = 0.1, outlier.shape = NA, size = 0.1) +
+  geom_half_violin(data = data_sub2, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "r", fill = diagonal_colours[2], nudge = 0.15, size = 0.1, width = 0.5) +
+  geom_half_boxplot(data = data_sub2, mapping = aes(x = diagonal, y = corrected_conn), 
+                   side = "r", fill = diagonal_colours[2], nudge = 0.12, width = 0.1, outlier.shape = NA, size = 0.1) +
+  scale_colour_viridis_c() +
+  scale_fill_manual(values = diagonal_colours) +
+  base_theme +
+  theme(legend.position = "none") +
+  labs(x = "", y = "Connectivity", title = "R-HC x R-PMC")
+
+
+# Add plots together
+diagonal_plots  <- plot_grid(p1, p2, p3, p4, ncol = 2)
+combined_figure <- plot_grid(plot_grid(heatmap_illustration, heatmap_data, ncol = 1), 
+                             diagonal_plots, 
+                             nrow = 1, rel_widths = c(1, 1.7))
+
+# Save
+ggsave(combined_figure,
+       filename = paste0(figurePath, "Fig_4_FRRC.png"), 
+       dpi = dpi,
+       width = 180,
+       height = 80,
+       units = "mm")
+
+# Calculate stats
+FRSC_data_diagonal_diff <- ddply(FRSC_data_diagonal, c("subject", "hemisphere_cortex", "hemisphere_HC"),
+                                 summarise, diff  = diff[1], corrected_diff = corrected_diff[1])
+FRSC_data_diagonal_diff_stats <- ddply(FRSC_data_diagonal_diff, c("hemisphere_cortex", "hemisphere_HC"), summarise,
+                                       p = t.test(diff)$p.value,
+                                       BF10 = signif(reportBF(ttestBF(diff)), digits1),
+                                       d = signif(mean(diff)/sd(diff), digits1))
+
+kable(FRSC_data_diagonal_diff_stats)
+```
+
+
+# Methods
+## Task and virtual environment
+### Trial types of the experiment
+#### Encoding trial
+
+Average trial lengths:
+
+```{r average_trial_length}
+# Subset data to encoding only
+encoding_only <- OLM_7T_trial_results[OLM_7T_trial_results$trialType == "encoding", ]
+
+# Calculate trial duration
+encoding_only$trial_duration <- encoding_only$end_time - encoding_only$start_time
+
+# Calculate the average for each subject
+trial_dur <- ddply(encoding_only, c("subject"), summarise,
+                   total_length = sum(trial_duration),
+                   run_length = total_length/2,
+                   trial_duration = mean(trial_duration),
+                   N = length(subject))
+
+# Create report strings
+str1   <-  mean_SD_str2(trial_dur$trial_duration, report_type, digits1, rounding_type)
+str2   <-  mean_SD_str2(trial_dur$run_length, report_type, digits1, rounding_type)
+
+```
+
+Average trial duration of an encoding trial: `r str1`.
+
+Average encoding run duration: `r str1`.
+
+## Procedure
+### Days between sessions
+```{r days_between_sessions}
+# Load lab notebook with information on each subject
+lab_notebook <- read_excel("data/ignore_fMRI_version1/VP00157_PPT_Info_Final.xlsx")
+
+# Subset to only the participants used in this analysis
+lab_notebook <- lab_notebook[lab_notebook$`ID Number` %in% subjects, ]
+
+# Extract time between sessions
+val <- lab_notebook$`Delay between sessions`
+
+# Create report string
+str1   <-  mean_SD_str2(val, report_type, digits1, rounding_type)
+```
+
+- Number of days between sessions `r str1`
+
+## MRI acquisition
+### Number of volumes
+```{r nVols}
+# Load the .RData with the values
+load("data/ignore_fMRI_version1/extracted_values/SpaNov_nVol_mean.RData")
+
+# Calculate the total number of volumes
+nVol_mean$nVol_total <- nVol_mean$nVol1 + nVol_mean$nVol2
+
+# Convert this to minutes
+nVol_mean$dataMinutes <- nVol_mean$nVol_total/60
+
+# Create report strings
+str1   <-  mean_SD_str2(nVol_mean$nVol1, report_type, digits1, rounding_type)
+str2   <-  mean_SD_str2(nVol_mean$nVol2, report_type, digits1, rounding_type)
+minTime <- signif(min(nVol_mean$dataMinutes), 3)
+```
+
+- Number of volumes Run 1: `r str1`
+- Number of volumes Run 2: `r str2`
+- Minimum data in minutes: `r minTime`
+
+## Neuroimaging analysis overview
+## Standard GLMs
+## Gradient analysis
+### Hippocampal gradient analysis
+
+Get the number of average voxels per position
+
+```{r voxel_per_position}
+voxelNum <- mean_SD_str2(HC_data_agg_pos$n, 1,digits1, rounding_type)
+```
+
+The average number of voxels per position is `r voxelNum`
+
+# Supplementary material
+
+
+## Supplementary notes
+## Supplementary tables
+### Significant clusters for linear contrast (Level 1 < Level 2 < Level 3 < ...)
+```{r clusterTable1}
+# Create tables
+kable(GLM1_cluster1$cluster_values)
+kable(GLM1_cluster1$cluster_labels)
+```
+
+### Significant clusters for linear contrast (Level 1 > Level 2 > Level 3 > ...)
+```{r clusterTable2}
+# Create tables
+kable(GLM1_cluster2$cluster_values)
+kable(GLM1_cluster2$cluster_labels)
+```
+
+## Supplementary figures
+### Locomotion by novelty
+```{r locomotion}
+# Load the image from the gradient event file creation
+load("ignore_eventTable3/images/SpaNov_event_file_gradients.RData")
+
+# Create a data frame
+ev_info <- rbindlist(condition_info)
+
+# Subset to the analysis with 6 levels and encoding and for the novelty score
+ev_info <- ev_info[ev_info$curr_numLvl == 6 & ev_info$runType == "e" & ev_info$type == "noveltyScore", ]
+
+# Calculate average across runs
+ev_info_agg <- ddply(ev_info, c("subj", "level"), summarise, 
+                     mean_per_tra_arc = mean(mean_per_tra_arc),
+                     mean_per_rot_arc = mean(mean_per_rot_arc),
+                     mean_per_sta_arc = mean(mean_per_sta_arc))
+
+# Calculate average for each run
+ev_info_agg1 <- ddply(ev_info, c("subj", "run"), summarise, 
+                     mean_per_tra_arc = mean(mean_per_tra_arc),
+                     mean_per_rot_arc = mean(mean_per_rot_arc),
+                     mean_per_sta_arc = mean(mean_per_sta_arc))
+
+
+# Remove middle levels
+ev_info_agg <- ev_info_agg[ev_info_agg$level == "lvl1" | ev_info_agg$level == "lvl6", ]
+
+# Create the plots
+## Translation
+### Define the limits
+axis_y <- calc_axis_limits(ev_info_agg$mean_per_tra_arc, axisExpand)
+
+### Plotting
+p1 <- ggplot(ev_info_agg, aes(x = level, y = mean_per_tra_arc, fill = level)) +
+  geom_line(aes(group = subj), size = 0.05) +
+  geom_point(size = 0.1, colour = boxplot_pointColour) +
+  geom_boxplot(colour = boxplot_borderColour, outlier.shape = NA, width = 0.4, size = 0.2, alpha = 0.7) +
+  scale_fill_manual(values = baseColours) +
+  base_theme + 
+  scale_y_continuous(breaks = axis_y$breaks) + 
+  coord_cartesian(xlim = c(0.5, 2.5), ylim = axis_y$limits, expand = FALSE) +
+  theme(legend.position = "none") +
+  labs(title = "Translation", x = "Novelty level", y = "arcsine(percentage)")
+
+## Rotation
+### Define the limits
+axis_y <- calc_axis_limits(ev_info_agg$mean_per_rot_arc, axisExpand)
+
+### Plotting
+p2 <- ggplot(ev_info_agg, aes(x = level, y = mean_per_rot_arc, fill = level)) +
+  geom_line(aes(group = subj), size = 0.05) +
+  geom_point(size = 0.1, colour = boxplot_pointColour) +
+  geom_boxplot(colour = boxplot_borderColour, outlier.shape = NA, width = 0.4, size = 0.2, alpha = 0.7) +
+  scale_fill_manual(values = baseColours) +
+  base_theme + 
+  scale_y_continuous(breaks = axis_y$breaks) + 
+  coord_cartesian(xlim = c(0.5, 2.5), ylim = axis_y$limits, expand = FALSE) +
+  theme(legend.position = "none") +
+  labs(title = "Rotation", x = "Novelty level", y = "arcsine(percentage)")
+
+## Stationary
+### Define the limits
+axis_y <- calc_axis_limits(ev_info_agg$mean_per_sta_arc, axisExpand)
+
+### Plotting
+p3 <- ggplot(ev_info_agg, aes(x = level, y = mean_per_sta_arc, fill = level)) +
+  geom_line(aes(group = subj), size = 0.05) +
+  geom_point(size = 0.1, colour = boxplot_pointColour) +
+  geom_boxplot(colour = boxplot_borderColour, outlier.shape = NA, width = 0.4, size = 0.2, alpha = 0.7) +
+  scale_fill_manual(values = baseColours) +
+  base_theme + 
+  scale_y_continuous(breaks = axis_y$breaks) + 
+  coord_cartesian(xlim = c(0.5, 2.5), ylim = axis_y$limits, expand = FALSE) +
+  theme(legend.position = "none") +
+  labs(title = "Stationary", x = "Novelty level", y = "arcsine(percentage)")
+
+# Combine and save
+p_comb <- plot_grid(p1, p2, p3, ncol = 3)
+
+ggsave(p_comb,
+       filename = paste0(figurePath, "Fig_1f_locomotion.png"), 
+       dpi = dpi,
+       width = double_column/2.5,
+       height = double_column/6,
+       units = "mm")
+
+# Calculate the test statistics
+## Translation
+val1     <- ev_info_agg[ev_info_agg$level == 'lvl1', "mean_per_tra_arc"]
+val2     <- ev_info_agg[ev_info_agg$level == 'lvl6', "mean_per_tra_arc"]
+diff_val <- val1 - val2
+BF1      <- signif(reportBF(ttestBF(diff_val)), digits1)
+d1       <- signif(mean(diff_val)/sd(diff_val), digits1)
+
+## Rotation
+val1     <- ev_info_agg[ev_info_agg$level == 'lvl1', "mean_per_rot_arc"]
+val2     <- ev_info_agg[ev_info_agg$level == 'lvl6', "mean_per_rot_arc"]
+diff_val <- val1 - val2
+BF2      <- signif(reportBF(ttestBF(diff_val)), digits1)
+d2       <- signif(mean(diff_val)/sd(diff_val), digits1)
+
+## Stationary
+val1     <- ev_info_agg[ev_info_agg$level == 'lvl1', "mean_per_sta_arc"]
+val2     <- ev_info_agg[ev_info_agg$level == 'lvl6', "mean_per_sta_arc"]
+diff_val <- val1 - val2
+BF3      <- signif(reportBF(ttestBF(diff_val)), digits1)
+d3       <- signif(mean(diff_val)/sd(diff_val), digits1)
+```
+
+- Translation Level 1 vs. Level 6: BF10 = `r BF1`, d = `r d1`
+- Rotation Level 1 vs. Level 6: BF10 = `r BF2`, d = `r d2`
+- Stationary Level 1 vs. Level 6: BF10 = `r BF3`, d = `r d3`
+
+
+![](figures/SpaNov/Fig_1f_locomotion.png)
+
+### Spatial novelty gradient in posterior medial cortex showed different principal functional connectivity manifold profiles
+```{r PMC_Margulies}
+# Compare the PMC gradient with the first connectivity gradient from Margulies et al. (2016)
+## Load PMC gradient
+PMC_gradient <- read_cifti("cifti_results/SpaNov_gradient_PMC_min.dlabel.nii")
+
+## Add to Margulies_grad data frame
+Margulies_grad$PMC_gradient <- c(PMC_gradient$data$cortex_left, PMC_gradient$data$cortex_right)
+
+## Subset to only vertices inside the PMC gradient
+Margulies_grad_PMC <- Margulies_grad[Margulies_grad$PMC_gradient != 0, ]
+
+## Make factor
+Margulies_grad_PMC$PMC_gradient <- factor(Margulies_grad_PMC$PMC_gradient, levels = 1:6, ordered = TRUE)
+
+
+## Create a figure
+Margulies_novelty <- ggplot(Margulies_grad_PMC, aes(x = PMC_gradient, y = Grad_1, fill = PMC_gradient)) +
+  geom_jitter(height = 0, size = 0.5, alpha = 0.1, width = 0.2) +
+  geom_boxplot(alpha = 0.8, outlier.shape = NA) +
+  scale_fill_manual(values = novFam_gradient[-5]) +
+  base_theme + 
+  theme(legend.position = "none") +
+  labs(x = "Spatial novelty-familarity gradient (PMC)", y = "Margulies' et al (2016) - 1st gradient", title = "Relation to connectivity gradient")
+
+# Save
+ggsave(Margulies_novelty,
+       filename = paste0(figurePath, "Fig_S2_ppc_PMC_gradient_Margulies.png"), 
+       dpi = dpi,
+       width = 90,
+       height = 80,
+       units = "mm")
+```
+
+
+### Posterior predictive checks for the novelty score model
+Find information here: https://mc-stan.org/rstanarm/reference/pp_check.stanreg.html
+
+```{r ppc}
+# Set extra seed because these plot are relatively variable with regard to the tails
+set.seed(20240206)
+
+p1 <- brms::pp_check(m_noveltyScore_run1, ndraws = 100) + 
+    scale_colour_manual(values = c("black", baseColours[1])) +
+  coord_cartesian(xlim = c(-20, 20), expand = TRUE) + 
+  base_theme + 
+  theme(axis.line.y = element_blank(),
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        legend.position = "none")
+p2 <- brms::pp_check(m_noveltyScore_run2, ndraws = 100) + 
+  scale_colour_manual(values = c("black", baseColours[1]), name = "") +
+  coord_cartesian(xlim = c(-50, 50), expand = TRUE) + 
+  base_theme + 
+  theme(axis.line.y = element_blank(),
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        legend.key.size = unit(0.5, 'mm'), #change legend key size
+        legend.key.height = unit(0.1, 'mm'), #change legend key height
+        legend.key.width = unit(1, 'mm'), #change legend key width
+        legend.title = element_text(size = 7), #change legend title font size
+        legend.text = element_text(size = 3),#change legend text font size
+        legend.spacing.y = unit(0, 'mm'),
+        legend.position = c(1, 0),
+        legend.justification = c(1, -0.5),
+        legend.background = element_blank(),
+        legend.margin = margin(unit(0, 'mm'), unit(0, 'mm'), unit(0, 'mm'), unit(0, 'mm')))
+
+# Solution to change the linewith found here: https://stackoverflow.com/questions/55450441/how-to-change-size-from-specific-geom-in-ggplot2
+p1$layers[[1]]$aes_params$linewidth <- 0.1
+p1$layers[[2]]$aes_params$linewidth <- 0.1
+p2$layers[[1]]$aes_params$linewidth <- 0.1
+p2$layers[[2]]$aes_params$linewidth <- 0.1
+
+# Combine plots
+p_comb <- plot_grid(p1, p2, ncol = 2)
+
+ggsave(p_comb,
+       filename = paste0(figurePath, "Fig_S3_ppc.png"), 
+       dpi = dpi,
+       width = double_column/5,
+       height = double_column/7,
+       units = "mm")
+```
+
+
