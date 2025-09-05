@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
 # General notes
-This scripts creates the event files for the gradient analysis for the SpaNov paper. At the moment, this script only supports data where all trials are completed. This only creates the events for the gradient analysis for the 3, 4, 5 and 6 regressor variant.
+This scripts creates the event files for the gradient analysis for the SpaNov paper.
 
 Here is some background how to combine to measure into one:
 
@@ -18,7 +18,7 @@ Here is some background how to combine to measure into one:
 - https://stats.stackexchange.com/questions/140434/does-a-correlation-matrix-of-two-variables-always-have-the-same-eigenvectors
 
 ```{r novelty_lvls}
-noveltyLvl <- c(3, 4, 5, 6)
+noveltyLvl <- c(6)
 numLevels  <- length(noveltyLvl)
 ```
 
@@ -134,7 +134,7 @@ positionData$trialType <- rep(trial_results$trialType, times = trial_rle$lengths
 </details>
 
 ## Folder & file naming convention
-The naming convention for the gradient analysis is: SpaNov_gradient_xlvl with x for the number of novelty/familiarity levels used in this analysis. The level of smoothing is additionally indicated by adding "_smo6" or "_smo2" add the end. Since the files created here are used with at least two different levels of smoothing, this was done by copying/rennaming the resulting folders.
+The naming convention for the gradient analysis is: SpaNov_gradient_xlvl with x for the number of novelty/familiarity levels used in this analysis. The level of smoothing is additionally indicated by adding "_smo6" or "_smo2" add the end. Since the files created here are used with at least two different levels of smoothing, this was done by copying and re-naming the resulting folders.
 
 <details>
  <summary>Code to create file & folder names </summary>
@@ -143,7 +143,7 @@ The naming convention for the gradient analysis is: SpaNov_gradient_xlvl with x 
 task <- "OLM"
 
 # Other information
-folder    <- "ignore_eventTable3/"
+folder    <- "event_tables/"
 session   <- "S007"
 runs      <- c(1, 1, 2, 2) # OlMe run1, OLMr run 1, OLMe run 2 etc.
 runType   <- c("e", "r", "e", "r")
@@ -253,7 +253,7 @@ time_diff <- ddply(positionData2, c("ppid", "run", "trial"), summarise,
 
 As a check, let's look at the average difference between data points, which is close to the `downsample_value` of `r downsample_value` with `r mean(time_diff$mean_time_diff)`. In other words, the new sampling rate is `r 1/mean(time_diff$mean_time_diff)` Hz
 
-# Calculate distances to objects
+# Calculate distances to objects & centre
 To investigate possible differences between novelty/familiarity levels, we in additional calculate the distance between the current position in the time series to a) the target object of the trial and b) to the closest object (excluding the gift). Note: The code below only really works if the data is in correct order especially with regard to the trials, which was checked using `rle()`
 
 ```{r calcDist2objects}
@@ -330,7 +330,7 @@ dist2target <- foreach(i = 1:length(subjects), .combine = 'c', .packages = "asso
 }
 
 # Run parallel loop 2
-dist2closet <- foreach(i = 1:length(subjects), .combine = 'c', .packages = "assortedRFunctions", .export = "objLocations") %dopar% {
+dist2closest <- foreach(i = 1:length(subjects), .combine = 'c', .packages = "assortedRFunctions", .export = "objLocations") %dopar% {
   # Subset data to one subject
   subData <- positionData2[positionData2$ppid == subjects[i], ]
   
@@ -351,22 +351,14 @@ dist2closet <- foreach(i = 1:length(subjects), .combine = 'c', .packages = "asso
 parallel::stopCluster(cl = my.cluster)
 
 # Add the results back to the data frame
-positionData2$dist2target <- dist2target
-positionData2$dist2closet <- dist2closet
+positionData2$dist2target  <- dist2target
+positionData2$dist2closest <- dist2closest
+
+# Calculate distance to centre
+positionData2$dist2centre <- euclideanDistance3D(0, 1, 0, positionData2$pos_x, 1, positionData2$pos_z)
 ```
 
 # Prepare the creation of event files by dividing the environment into sectors
-Note: The part below is a vestige of previous scripts where multiple sector sizes were used but here only sectoreSize = 10 is used.
-
-```{r sector_table}
-# Create the sector table
-sector_table <- data.frame(Name = "SpaNov_gradient",
-                           sectorSize = 10)
-
-# Display the table
-kable(sector_table)
-```
-
 Other parameters for this analysis:
 
 ```{r fixed_param}
@@ -379,7 +371,7 @@ Before we can move to creating the events, we have to calculate in which sector 
 
 ```{r sector_envorionment}
 # Get the number of seeds of this analysis
-numSeeds <- sector_table$sectorSize[1] # Number of values per axis
+numSeeds <- 10 # Number of values per axis
 
 # Bin the environment
 x           <- positionData2$pos_x
@@ -404,6 +396,7 @@ Finally, we move to create the events and then the event files for the gradient 
 condition_info  <- list()
 event_file_list <- list()
 subj_list       <- list()
+event_info      <- list()
 
 # Convert moving to boolean
 positionData2$moving2 <- ifelse(positionData2$moving == "True", TRUE, FALSE)
@@ -472,12 +465,15 @@ for(subj in 1:length(subjIDs)){
   periods_agg <- ddply(tempData, c("run", "trial", "period", "sector"), summarise, 
                        onset = min(time), 
                        offset = max(time),
+                       pos_x = mean(pos_x),
+                       pos_z = mean(pos_z),
                        duration = offset - onset,
                        per_tra = mean(tra_rot_sta == "translation"),
                        per_rot = mean(tra_rot_sta == "rotation"),
                        per_sta = mean(tra_rot_sta == "stationary"),
                        mean_dist2target = mean(dist2target),
-                       mean_dist2closet = mean(dist2closet))
+                       mean_dist2closest = mean(dist2closest),
+                       mean_dist2centre = mean(dist2centre))
   
   # Calculate duration of movement
   periods_agg$dur_tra <- periods_agg$per_tra * periods_agg$duration
@@ -500,8 +496,8 @@ for(subj in 1:length(subjIDs)){
       index <- 1:(rowID - 1)
       
       # Current sector & subset to past periods
-      currentSector  <- periods_agg$sector[rowID]
-      pastPeriods <- periods_agg[index, ]
+      currentSector <- periods_agg$sector[rowID]
+      pastPeriods   <- periods_agg[index, ]
       
       # Check if same sector was was visited in the past (based on the index)
       # To do this subset
@@ -596,6 +592,12 @@ for(subj in 1:length(subjIDs)){
       tempData$lastVisit_gradientLevel    <- lastVisit_gradientLevel
       tempData$noveltyScore_gradientLevel <- noveltyScore_gradientLevel
       
+      # Subject information
+      tempData$ppid <- subjIDs[subj]
+      
+      # Add to list for later analysis
+      event_info[[length(event_info) + 1]] <- tempData
+      
       # Calculate the average times
       tempData_agg1 <- na.omit(ddply(tempData, c("lastVisit_gradientLevel"), 
                                      summarise, 
@@ -614,7 +616,8 @@ for(subj in 1:length(subjIDs)){
                                      mean_per_rot_arc = mean(arcsine_transform(per_rot)),
                                      mean_per_sta_arc = mean(arcsine_transform(per_sta)),
                                      mean_dist2target = mean(mean_dist2target),
-                                     mean_dist2closet = mean(mean_dist2closet)))
+                                     mean_dist2closest = mean(mean_dist2closest),
+                                     mean_dist2centre = mean(mean_dist2centre)))
       tempData_agg2 <- na.omit(ddply(tempData, c("noveltyScore_gradientLevel"), 
                                      summarise, 
                                      mean_duration = mean(duration),
@@ -632,7 +635,8 @@ for(subj in 1:length(subjIDs)){
                                      mean_per_rot_arc = mean(arcsine_transform(per_rot)),
                                      mean_per_sta_arc = mean(arcsine_transform(per_sta)),
                                      mean_dist2target = mean(mean_dist2target),
-                                     mean_dist2closet = mean(mean_dist2closet)))
+                                     mean_dist2closest = mean(mean_dist2closest),
+                                     mean_dist2centre = mean(mean_dist2centre)))
       
       # Add to one data frame
       names(tempData_agg1)[1] <- "level"
@@ -641,13 +645,12 @@ for(subj in 1:length(subjIDs)){
       tempData_agg2$type <- "noveltyScore"
       tempData_agg <- rbind(tempData_agg1, tempData_agg2)
       
-      
       # Create a data frame with extra information and add to list
-      extra_info <- tempData_agg
-      extra_info$subj <- subjIDs[subj]
-      extra_info$run  <- runs[run]
+      extra_info             <- tempData_agg
+      extra_info$subj        <- subjIDs[subj]
+      extra_info$run         <- runs[run]
       extra_info$curr_numLvl <- curr_numLvl
-      extra_info$runType <- runType[run]
+      extra_info$runType     <- runType[run]
       condition_info[[length(condition_info) + 1]] <- extra_info
       
       # Get runstartTime
@@ -706,6 +709,29 @@ for(subj in 1:length(subjIDs)){
         event_file_list[[length(event_file_list) + 1]] <- tempDF
       }
       
+      # Create event files for the cue and delay periods
+      ## Cue
+      cue_sub <- cues_agg[cues_agg$ppid == subjIDs[subj] & cues_agg$block_num == run, ]
+      tempDF  <- data.frame(onset = cue_sub$start - runStartTime,
+                           duration = cue_sub$duration, weight = 1)
+      write.table(tempDF, 
+                  file = paste0(currentFolder1, "cue.txt"),
+                  col.names = FALSE, 
+                  row.names = FALSE,
+                  quote =  FALSE,
+                  sep = '\t')
+      
+      ## Delay
+      delay_sub <- delays_agg[delays_agg$ppid == subjIDs[subj] & delays_agg$block_num == run, ]
+      tempDF    <- data.frame(onset = delay_sub$start - runStartTime,
+                           duration = delay_sub$duration, weight = 1)
+      write.table(tempDF, 
+                  file = paste0(currentFolder1, "delay.txt"),
+                  col.names = FALSE, 
+                  row.names = FALSE,
+                  quote =  FALSE,
+                  sep = '\t')
+
       # Create co-variate files for per_tra and dur_tra
       ## Duration of translation
       ### The Onsets are made relative to runStartTime
@@ -759,7 +785,7 @@ for(subj in 1:length(subjIDs)){
 Saving an image to analyse further aspects of the events. 
 
 ```{r save_image}
-save.image(file = "ignore_eventTable3/images/SpaNov_event_file_gradients.RData")
+save.image(file = "event_tables/images/SpaNov_event_file_gradients.RData")
 ```
 
 ## Analyse the results
@@ -857,7 +883,7 @@ This does show that each level has lower novelty scores passing this sanity chec
 ### Loocomotion states as a function of the level
 Here, we're actually only interested in the analysis that we used for the paper, which is the 6-level version of the analysis. The same is to check if locomotion states are different for the different novelty/familiarity levels. 
 
-```{r locomotion_6levels}
+```{r locomotion_6levels, fig.width = 8, fig.height = 4}
 # Subset to the analysis with 6 levels
 subData_6levels <- condition_info_df[condition_info_df$curr_numLvl == 6, ]
 
@@ -882,10 +908,10 @@ plot_grid(p1, p2, p3, ncol = 3)
 
 Indeed it seems to be the case that stationary/rotation periods are lower when the sector is more familiar. 
 
-### Average distance to the objects
+### Average distance to the objects and the centre
 We're again only interested in the 6-level variant to see if any of the middle levels are odd in terms of the average distance to the target object of the trial or in terms of the average distance to the closest object. 
 
-```{r dist2objects}
+```{r dist2objects, fig.width = 8, fig.height = 4}
 # Create the plots
 p1 <- ggplot(subData_6levels, aes(x = level, y = mean_dist2target, fill = level)) +
   geom_boxplot() +
@@ -893,17 +919,22 @@ p1 <- ggplot(subData_6levels, aes(x = level, y = mean_dist2target, fill = level)
   labs(title = "Distance to the\ntarget object", 
        x = "Novelty level", y = "Avg. distance to target in vm")
 
-p2 <- ggplot(subData_6levels, aes(x = level, y = mean_dist2closet, fill = level)) +
+p2 <- ggplot(subData_6levels, aes(x = level, y = mean_dist2closest, fill = level)) +
   geom_boxplot() +
   theme(legend.position = "none") +
   labs(title = "Distance to the\nclosest object", 
        x = "Novelty level", y = "Avg. distance to closest in vm")
 
+p3 <- ggplot(subData_6levels, aes(x = level, y = mean_dist2centre, fill = level)) +
+  geom_boxplot() +
+  theme(legend.position = "none") +
+  labs(title = "Distance to the\ncentre", 
+       x = "Novelty level", y = "Avg. distance to centre in vm")
+
 # Combine plots
-plot_grid(p1, p2, ncol = 2)
+plot_grid(p1, p2, p3, nrow = 1)
 ```
 
-It doesn't seem to be the case that Level 2 is odd relative to the other levels. 
 
 ### A couple of further checks
 

@@ -1,0 +1,638 @@
+---
+title: 'Trial Generation for fMRI version 1 - session 2'
+author: "Joern Alexander Quent"
+date: "22/09/2022"
+output: html_document
+---
+
+```{r setup, include = FALSE, message = FALSE, warnings = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+# Libs
+library(ggplot2)
+library(latex2exp)
+library(assortedRFunctions) #devtools::install_github("JAQuent/assortedRFunctions", upgrade = 'never')
+library(knitr)
+library(plyr)
+```
+
+# Description
+This is used to generate the trials for the fMRI version 1 - session 2. This includes the following components & parameters:
+
+- Pre-scanning practice
+  - Practice arena
+  - 3 objects from the desert object set
+  - 6 encoding trials
+  - 6 retrieval trials
+  - 2 control trials
+- fMRI version
+  - run 1: 18 encoding, run 2: 9 retrieval/9 control/9 retrieval/9 control, run 3: 9 encoding, run 4: 9 retrieval/9 control/9 retrieval/9 control
+  - Grassy arena
+  - Grassy object set
+
+# General task parameters
+
+```{r general_task_param}
+# Speed rotation
+speedForward  <- 10 # vm/s
+rotationSpeed <- 50 # degrees/s
+
+# Number of times each object is presented
+numberPerObject <- 3
+
+# Timing
+cuePeriod      <- rep(2, numberPerObject) # seconds
+delayPeriods   <- seq(from = 1, to = 2, length.out = numberPerObject) # seconds
+ITIPeriods     <- seq(from = 1, to = 2, length.out = numberPerObject) # seconds
+``` 
+
+# Available objects
+```{r object_table, echo = FALSE}
+tab1 <- data.frame(Object = c("Drum", "Basketball", "Pineapple", "Dice", "Cake", "Lamp", "Barrel", "Football", "Pawn", "Traffic cone", "Donut", "Vase", "Gift", "Teddy"),
+                   Number = c(7, 2, 12, 5, 3, 10, 1, 8, 11, 4, 6, 13, 9, 14),
+                   Version = c(rep(c('Desert', 'Grassy'), each = 6), 'Control','Practice'))
+
+kable(tab1)
+```
+
+# Needed column for the .csv file
+The .csv files needs entries the following columns: 
+
+- _trial_num_ = Number of the trial (This will ensure that thee trials will be presented in the right order)
+- _block_num_ = Number of the block (needed for UXF).
+- _targets_	= The target given as the object number from 1 - 13 (see below how these numbers correspond to the object names).
+- _start_x_	= Start location of the player.
+- _start_z_	= Start location of the player.
+- _start_yRotation_	= Start rotation of the player. 
+- _object_x_	= Object location of the target. With the exception of control trials, this must be the same for all trials with the same target. 
+- _object_z_	= Object location of the target. With the exception of control trials, this must be the same for all trials with the same target. 
+- _cue_ = Period the cue is presented in seconds.
+- _delay_	= Delay period after the cue was presented in seconds. 
+- _ITI_	= ITI in seconds. 
+- _trialType_	= Trial type i.e. encoding, retrieval or control trials (last one using the gift as the object). 
+- _speedForward_	= Forward speed in vm/s. 
+- _rotationSpeed_	= Rotation speed in degrees/s.
+- _start_centrality_ If start location is less than half the radius away from the centre, then it is central otherwise periphery. This not used by the unity. 
+- _perfectAngle_ = The movement angle that leads from the start point to the target.  
+- _messageToDisplay_ = Integer indicating whether a messages should be displayed after the trial (yes if >= 0, no if -1). Numbers above -1 are used as the index of the message from the list. 
+
+# Pre-scanning practice
+In order to make things a bit easier, the practice trials are not chosen algorithmically but were simply manually defined.
+
+```{r practice_object_locations}
+# Seed for practice
+set.seed(20220922+5)
+
+# Randomly choose object locations
+objLoc <- data.frame(x = c(-25, 5, 20),
+                     z = c(25, -23, -2),
+                     object = as.factor(1:3))
+
+# Practice 
+trialOrder <- data.frame(object = c(sample(rep(1:3, each = 2)), sample(rep(1:3, each = 2)), 1, 2))
+
+
+# Get only the main task object
+practice_objects <- tab1[tab1$Version == "Desert", ]
+practice_objects <- practice_objects[1:3, ] # Only the first three
+
+# Assign the temporary label from the trial order to it
+practice_objects$tempNum <- 1:3
+
+# Quickly loop through trialOrder
+trialOrder$targets     <- NA
+trialOrder$targetNames <- NA
+trialOrder$x           <- NA
+trialOrder$z           <- NA
+for(i in 1:nrow(trialOrder)){
+  # Object name
+  trialOrder$targets[i]     <- practice_objects$Number[as.numeric(trialOrder[i, 'object'])]
+  trialOrder$targetNames[i] <- practice_objects$Object[as.numeric(trialOrder[i, 'object'])]
+  
+  # Object location
+  trialOrder$x[i] <- objLoc$x[as.numeric(trialOrder[i, 'object'])]
+  trialOrder$z[i] <- objLoc$z[as.numeric(trialOrder[i, 'object'])]
+}
+
+# Add random start location
+trialOrder$start_x <- c(-12, 25, 12.5, -25, 0, 13.5, 6, 12.5, -12.5, 0 , 7,-12.5, -25, 12)
+trialOrder$start_z <- c(30, 0, 5, -12.5, 30, 23, 27, 24, 2.5, 12.5 , 7,-30, 14, 7)
+
+# Perfect angles
+trialOrder$perfectAngle <- NA
+
+# Add trial type
+trialOrder$trialType <- c(rep("encoding", 6), rep("retrieval", 6), rep("control", 2))
+
+# Loop through each trial
+for(i in 1:nrow(trialOrder)){
+  # Step 1 get points
+  x <- trialOrder$x[i] - trialOrder$start_x[i]
+  z <- trialOrder$z[i] - trialOrder$start_z[i]
+  
+  # Calculate angle
+  trialOrder$perfectAngle[i] <- getAngleInDegreesFromPoint(x, z)
+}
+```
+
+```{r practice_csv_file}
+# Adding to one DF
+practice <- data.frame(trial_num = 1:nrow(trialOrder),
+                       block_num = 1,
+                       targets = trialOrder$targets,
+                       targetNames= trialOrder$targetNames,
+                       start_x = trialOrder$start_x,
+                       start_z = trialOrder$start_z,
+                       object_x = trialOrder$x,
+                       object_z = trialOrder$z,
+                       cue = c(sample(rep(cuePeriod, each = 4)), 2, 2),
+                       delay = c(sample(rep(delayPeriods, each = 4)), 1.5, 1.5),
+                       ITI = c(sample(rep(ITIPeriods, each = 4)), 1.5, 1.5),
+                       trialType = trialOrder$trialType,
+                       speedForward = speedForward,
+                       rotationSpeed = rotationSpeed,
+                       perfectAngle = trialOrder$perfectAngle, 
+                       messageToDisplay = -1)
+
+# Sample start locations from uniform distribution
+practice$start_yRotation <- runif(n = nrow(practice), min = 0, max = 360)
+
+# After plotting put in the correct name for control trial
+practice$targets[practice$trialType == 'control'] <- 9
+practice$targetNames[practice$trialType == 'control'] <- "Gift"
+
+# Add the messages
+practice[6, 'messageToDisplay'] <- 0 # Between retrieval and encoding
+practice[12, 'messageToDisplay'] <- 1 # Before control trials
+
+# Write .csv file
+write.csv(x = practice, file = 'inputFiles/1_practice/practice_fMRI_version1_session2.csv', quote = FALSE, row.names = FALSE)
+```
+
+```{r practice_locations, fig.height = 6, fig.width = 7.5}
+ggplot(trialOrder) +
+  geom_point(aes(x = x, y = z, colour = targetNames), size = 5) + 
+  geom_point(aes(x = start_x, y = start_z, colour = targetNames), size = 3, shape = 3) + 
+  # Border of the hexagon
+  geom_segment(aes(x = 25, y = 42.2, xend = 50, yend = 0)) +
+  geom_segment(aes(x = 50, y = 0, xend = 25, yend = -43.7)) +
+  geom_segment(aes(x = 25, y =-43.7, xend = -25, yend = -43.7)) +
+  geom_segment(aes(x = -25, y =-43.7, xend = -50, yend = 0)) +
+  geom_segment(aes(x = -50, y =0, xend = -25, yend = 42.2)) +
+  geom_segment(aes(x = -25, y = 42.2, xend = 25, yend = 42.2)) +
+  # Labels
+  labs(title = "Object distribution for practice", x = "Position on x", y = "Position on z")
+```
+
+Note the gifts are overlapping with the other two objects, which is why they are not visible. 
+
+# fMRI trial
+The following algorithm was used to create the object locations: 
+
+> The object locations were randomly chosen with the following constraints: they had to be at least 25 vm from the edge of the environment, at least 10 vm from the centre and at least 10 vm away from the nearest other object. 
+
+```{r find_object_locations}
+# Set the seed
+set.seed(20220516 + 8)
+
+# Re-run
+rerun <- TRUE
+
+# Constraints & parameters
+obj2edge   <- 25
+obj2centre <- 10
+obj2obj    <- 10
+diameter   <- 180
+numObjects <- 6
+centre     <- data.frame(x = 0, z = 0)
+steps      <- 1
+
+# Draw circle for the edge
+edge   <- circleFun(c(0, 0), diameter, npoints = 1000)
+edge$z <- edge$y # Rename to avoid error that columns do not match
+edge$y <- NULL
+
+# Get min & max for uniform distribution
+minValue = -(diameter/2 - obj2edge) 
+maxValue = (diameter/2 - obj2edge)
+# Because of the obj2edge constraint I don't even need to cover the full range of the environment
+
+# Constraint function
+isNotValid <- function(objLoc){
+  # Object 2 edge constraint
+  con1 <- c()
+  for(i in 1:numObjects){
+    # Temp bind
+    tempBind <- rbind(objLoc[i, ], edge)
+    
+    # Remove row names
+    row.names(tempBind) <- NULL
+    
+    # Calculate distances
+    tempDistances <- as.matrix(dist(tempBind))
+    
+    
+    con1[i] <- any(tempDistances[1, 2:nrow(tempDistances)] <= obj2edge)
+  }
+  # Aggregate with any
+  con1 <- any(con1)
+  
+  # Object 2 centre constraint (also check that it is not outside the circle)
+  tempDistances <- as.matrix(dist(rbind(centre, objLoc)))
+  con2 <- any(tempDistances[1, 2:nrow(tempDistances)] <= obj2centre | tempDistances[1, 2:nrow(tempDistances)] > diameter/2)
+  
+  # Object 2 object constraint
+  con3 <- any(dist(objLoc) <= obj2obj)
+  
+  
+
+  return(any(con1, con2, con3))
+}
+
+# Run algorithm
+# Randomly choose object locations
+objLoc <- data.frame(x = runif(numObjects, min = minValue, max = maxValue),
+                     z = runif(numObjects, min = minValue, max = maxValue))
+
+# Check constraints
+while(isNotValid(objLoc)){
+  # Sample again
+  objLoc <- data.frame(x = runif(numObjects, min = minValue, max = maxValue),
+                       z = runif(numObjects, min = minValue, max = maxValue))
+  
+  # Count steps
+  steps = steps + 1
+}
+
+# Add object number to objLoc
+objLoc$object <- 1:6
+
+# Save
+save.image("OLM_startlocation_fMRI_version1_layout3.RData")
+```
+
+# Random starting locations
+fMRI version 1 session 2 of the task will have 18 encoding trials, 18/18 retrieval/control trials, 18 encoding trials and again 18/18 retrieval/control trials (in total 108). Each of the now specified object locations is used a total of five times per run for each condition. This also applies to control trials where the gift box is simply presented in one of those object locations. 
+
+This means 180 random starting locations and heading angles are needed. For the starting locations the constraints are that they have to be at least 60 vm away from the correct object and obviously they cannot be outside the circle. The minimum distance to the edge is 15 vm.  
+
+To run this, the algorithm from above is re-purposed to select the starting locations but first I create the trial order. As an added constraint, we don't want the same object to appear twice in a row. 
+
+
+```{r create_trial_order}
+# Seed
+set.seed(20220517 + 8)
+
+# Function to sample the timing variables
+timing_sample <- function(df, cuePeriod, delayPeriods, ITIPeriods){
+  # Get number of rows
+  numRows <- nrow(df)
+  
+  # Add values
+  df$cuePeriod <- sample(rep(cuePeriod, numRows/length(cuePeriod)))
+  df$delayPeriods <- sample(rep(delayPeriods, numRows/length(delayPeriods)))
+  df$ITIPeriods <- sample(rep(ITIPeriods, numRows/length(ITIPeriods)))
+  
+  return(df)
+}
+
+# Generate trial order function & add timing variables
+gen_trialOrder <- function(objLoc){
+  # Sample run 1
+  run1 <- objLoc[sample(rep(1:6, each = numberPerObject)),]
+  run1 <- timing_sample(run1, cuePeriod, delayPeriods, ITIPeriods)
+  # Check if there are repetitions and if there are repeat part with repetition
+  while(max(rle(run1$object)$length) > 1){
+    # Generate trial order
+    run1 <- objLoc[sample(rep(1:6, each = numberPerObject)),]
+    run1 <- timing_sample(run1, cuePeriod, delayPeriods, ITIPeriods)
+  }
+  
+  # For run 2 the sampling has to be done twice because this block/run is split between retrieval and control
+  # Check if there are repetitions and if there are repeat part with repetition
+  tempRun2_control   <- objLoc[sample(rep(1:6, each = numberPerObject)),]
+  tempRun2_retrieval <- objLoc[sample(rep(1:6, each = numberPerObject)),]
+  tempRun2_control   <- timing_sample(tempRun2_control, cuePeriod, delayPeriods, ITIPeriods)
+  tempRun2_retrieval <- timing_sample(tempRun2_retrieval, cuePeriod, delayPeriods, ITIPeriods)
+  run2               <- rbind(tempRun2_retrieval[1:((numberPerObject*numObjects)/2), ], 
+                              tempRun2_control[1:((numberPerObject*numObjects)/2), ], 
+                              tempRun2_retrieval[(((numberPerObject*numObjects)/2)+1):(numberPerObject*numObjects), ], 
+                              tempRun2_control[(((numberPerObject*numObjects)/2)+1):(numberPerObject*numObjects), ])
+  while(max(rle(run2$object)$length) > 1){
+    # Generate trial order
+    tempRun2_control   <- objLoc[sample(rep(1:6, each = numberPerObject)),]
+    tempRun2_retrieval <- objLoc[sample(rep(1:6, each = numberPerObject)),]
+    tempRun2_control   <- timing_sample(tempRun2_control, cuePeriod, delayPeriods, ITIPeriods)
+    tempRun2_retrieval <- timing_sample(tempRun2_retrieval, cuePeriod, delayPeriods, ITIPeriods)
+    run2               <- rbind(tempRun2_retrieval[1:((numberPerObject*numObjects)/2), ], 
+                                tempRun2_control[1:((numberPerObject*numObjects)/2), ], 
+                                tempRun2_retrieval[(((numberPerObject*numObjects)/2)+1):(numberPerObject*numObjects), ], 
+                                tempRun2_control[(((numberPerObject*numObjects)/2)+1):(numberPerObject*numObjects), ])
+  }
+  
+  # Sample run 3
+  run3 <- objLoc[sample(rep(1:6, each = numberPerObject)),]
+  run3   <- timing_sample(run3, cuePeriod, delayPeriods, ITIPeriods)
+  # Check if there are repetitions and if there are repeat part with repetition
+  while(max(rle(run3$object)$length) > 1){
+    # Generate trial order
+    run3 <- objLoc[sample(rep(1:6, each = numberPerObject)),]
+    run3   <- timing_sample(run3, cuePeriod, delayPeriods, ITIPeriods)
+  }
+  
+  # For run 4 the sampling has to be done twice because this block/run is split between retrieval and control
+  # Check if there are repetitions and if there are repeat part with repetition
+  tempRun4_control   <- objLoc[sample(rep(1:6, each = numberPerObject)),]
+  tempRun4_retrieval <- objLoc[sample(rep(1:6, each = numberPerObject)),]
+  tempRun4_control   <- timing_sample(tempRun4_control, cuePeriod, delayPeriods, ITIPeriods)
+  tempRun4_retrieval <- timing_sample(tempRun4_retrieval, cuePeriod, delayPeriods, ITIPeriods)
+  run4               <- rbind(tempRun4_retrieval[1:((numberPerObject*numObjects)/2), ], 
+                              tempRun4_control[1:((numberPerObject*numObjects)/2), ], 
+                              tempRun4_retrieval[(((numberPerObject*numObjects)/2)+1):(numberPerObject*numObjects), ], 
+                              tempRun4_control[(((numberPerObject*numObjects)/2)+1):(numberPerObject*numObjects), ])
+  while(max(rle(run4$object)$length) > 1){
+    # Generate trial order
+    tempRun4_control   <- objLoc[sample(rep(1:6, each = numberPerObject)),]
+    tempRun4_retrieval <- objLoc[sample(rep(1:6, each = numberPerObject)),]
+    tempRun4_control   <- timing_sample(tempRun4_control, cuePeriod, delayPeriods, ITIPeriods)
+    tempRun4_retrieval <- timing_sample(tempRun4_retrieval, cuePeriod, delayPeriods, ITIPeriods)
+    run4               <- rbind(tempRun4_retrieval[1:((numberPerObject*numObjects)/2), ], 
+                                tempRun4_control[1:((numberPerObject*numObjects)/2), ], 
+                                tempRun4_retrieval[(((numberPerObject*numObjects)/2)+1):(numberPerObject*numObjects), ], 
+                                tempRun4_control[(((numberPerObject*numObjects)/2)+1):(numberPerObject*numObjects), ])
+  }
+  
+  # Bind to 1 DF
+  trialOrder <- rbind(run1, run2, run3, run4)
+  
+  # Check if no repetitions across runs/blocks
+  if(max(rle(trialOrder$object)$length) > 1){
+    trialOrder <- gen_trialOrder(objLoc)
+  }
+  
+  # Return trial order
+  return(trialOrder)
+}
+
+# Sample once
+trialOrder <- gen_trialOrder(objLoc)
+row.names(trialOrder) <- NULL
+
+#### Add the correct object names
+# Get only the main task object
+mainTask_objects <- tab1[tab1$Version == "Grassy",]
+
+# Assign the temporary label from the trial order to it
+mainTask_objects$tempNum <- 1:numObjects
+
+# Quickly loop through trialOrder
+trialOrder$targets     <- NA
+trialOrder$targetNames <- NA
+for(i in 1:nrow(trialOrder)){
+  trialOrder$targets[i]     <- mainTask_objects$Number[as.numeric(trialOrder[i, 'object'])]
+  trialOrder$targetNames[i] <- mainTask_objects$Object[as.numeric(trialOrder[i, 'object'])]
+}
+
+# Add auxiliary information
+trialOrder$trial_num <- 1:nrow(trialOrder)
+trialOrder$block_num <- rep(1:4, times = c((numberPerObject*numObjects), 
+                                           (numberPerObject*numObjects)*2, 
+                                           (numberPerObject*numObjects), 
+                                           (numberPerObject*numObjects)*2))
+trialOrder$trialType <- rep(c('encoding', 
+                              'retrieval', 
+                              'control', 
+                              'retrieval', 
+                              'control', 
+                              'encoding', 
+                              'retrieval', 
+                              'control', 
+                              'retrieval', 
+                              'control'), 
+                            times = c((numberPerObject*numObjects), 
+                                      rep((numberPerObject*numObjects)/2, 4), 
+                                      (numberPerObject*numObjects), 
+                                      rep((numberPerObject*numObjects)/2, 4)))
+```
+
+After creating the trial order, starting locations can be determined based on a similar algorithm and similar constraints. 
+
+```{r starting_locations}
+# Set the seed
+set.seed(20220517 + 8)
+
+# Constraints & parameters
+start2edge <- 15
+start2obj  <- 60
+diameter   <- 180
+numLoc     <- nrow(trialOrder)
+centre     <- data.frame(x = 0, z = 0)
+steps      <- 1
+
+# Get min & max for uniform distribution
+minValue = -(diameter/2 - start2edge) 
+maxValue = (diameter/2 - start2edge)
+# Because of the start2edge constraint I don't even need to cover the full range of the environment
+
+# Constraint function but now for each location individually
+isNotValid <- function(startLoc, objLoc){
+  # Start 2 edge constraint
+  # Temp bind
+  tempBind <- rbind(startLoc, edge)
+    
+  # Remove row names
+  row.names(tempBind) <- NULL
+    
+  # Calculate distances
+  tempDistances <- as.matrix(dist(tempBind))
+  
+  # Evaluate  
+  con1 <- any(tempDistances[1, 2:nrow(tempDistances)] <= start2edge)
+  
+  
+  # Check that it is not outside the circle)
+  tempDistances <- as.matrix(dist(rbind(centre, startLoc)))
+  con2 <- any(tempDistances[1, 2:nrow(tempDistances)] > diameter/2)
+  
+  # start 2 object constraint
+  # Temp bind
+  tempBind <- rbind(startLoc, objLoc)
+    
+  # Remove row names
+  row.names(tempBind) <- NULL
+    
+  # Calculate distances
+  tempDistances <- as.matrix(dist(tempBind))
+    
+    
+  con3 <- any(tempDistances[1, 2:nrow(tempDistances)] <= start2obj)
+  
+
+  return(any(con1, con2, con3))
+}
+
+# Sample function
+sampler <- function(){
+  startLoc <- data.frame(x = runif(1, min = minValue, max = maxValue),
+                         z = runif(1, min = minValue, max = maxValue))
+  return(startLoc)
+}
+
+
+# Recursive function
+recursiveFun <- function(steps, objLoc){
+  # Print to console
+  #cat(paste0("\rstep " , as.character(steps)))
+  
+  # Sample
+  tempStartLoc <- sampler()
+  
+  # Check if valid if not do again
+  if(!isNotValid(tempStartLoc, objLoc)){
+    return(tempStartLoc)
+  } else {
+    steps <- steps + 1
+    return(recursiveFun(steps, objLoc))
+  }
+}
+
+# Run this recursive algorithm for all objects
+startLoc <- data.frame(x = NULL, z = NULL)
+
+for(i in 1:numLoc){
+  steps <- 1
+  
+  startLoc <- rbind(startLoc, recursiveFun(steps, data.frame(x = trialOrder$x[i], z = trialOrder$z[i])))
+}
+
+# Add back to trialOrder
+trialOrder$start_x <- startLoc$x
+trialOrder$start_z <- startLoc$z
+```
+
+Now the distribution of objects and their associated start locations can be plotted
+
+```{r plot_results2.1, fig.height = 6, fig.width = 7.5}
+# Plot results
+ggplot(trialOrder) + 
+  geom_point(aes(x = x, y = z, colour = targetNames), size = 5) + 
+  geom_point(aes(x = start_x, y = start_z, colour = targetNames), size = 3, shape = 3) +
+  geom_path(data = edge, mapping = aes(x = x, y = z)) +
+  labs(title = "Selected objects & start locations following constraints", x = "Position on x", y = "Position on z")
+```
+
+Or plotted for each object separately:
+
+```{r plot_results2.2, fig.height = 4.5, fig.width = 6.5}
+ggplot(trialOrder) + 
+  facet_wrap(~ targetNames) +
+  geom_point(aes(x = x, y = z, colour = targetNames), size = 5) + 
+  geom_point(aes(x = start_x, y = start_z, colour = targetNames), size = 3, shape = 3) +
+  geom_path(data = edge, mapping = aes(x = x, y = z)) +
+  labs(title = "Selected objects & start locations following constraints", x = "Position on x", y = "Position on z")
+
+# After display put the correct names in for control trials
+trialOrder$targets[trialOrder$trialType == 'control'] <- 9
+trialOrder$targetNames[trialOrder$trialType == 'control'] <- "Gift"
+```
+
+## Calculate translation angles
+In order to check a) if the overall distribution of angles are acceptable and to make sure that there are no differences between the three conditions, I quickly calculated the angles of translation if performance were perfect. 
+
+```{r check_angle_distribution}
+# Create column
+trialOrder$perfectAngle <- NA
+
+# Loop through each trial
+for(i in 1:nrow(trialOrder)){
+  # Step 1 get points
+  x <- trialOrder$x[i] - trialOrder$start_x[i]
+  z <- trialOrder$z[i] - trialOrder$start_z[i]
+  
+  # Calculate angle
+  trialOrder$perfectAngle[i] <- getAngleInDegreesFromPoint(x, z)
+}
+```
+
+```{r polar_plot, fig.height = 6, fig.width = 6, echo = FALSE}
+ggplot(trialOrder, aes(x = perfectAngle)) +
+  geom_histogram(binwidth = 7.5, boundary = -7.5, colour = "black", size = .25) +
+  scale_x_continuous(limits = c(0,360),
+                     breaks = seq(0, 360, by = 60),
+                     minor_breaks = seq(0, 360, by = 15))  +
+  coord_polar() +
+  labs(title = 'Distribution of angles',
+       y = 'Count',
+       x = '')
+```
+
+```{r polar_plot2, fig.height = 6, fig.width = 12, echo = FALSE}
+ggplot(trialOrder, aes(x = perfectAngle)) +
+  facet_grid(.~trialType) +
+  geom_histogram(binwidth = 7.5, boundary = -7.5, colour = "black", size = .25) +
+  scale_x_continuous(limits = c(0,360),
+                     breaks = seq(0, 360, by = 60),
+                     minor_breaks = seq(0, 360, by = 15))  +
+  coord_polar() +
+  labs(title = 'Distribution of angles',
+       y = 'Count',
+       x = '')
+```
+
+## Calculate centrality
+An object is central if it is within the circle that has half the radius of the outer circle (the border of the arena).
+
+```{r calc_centrality}
+# Area of the arena
+radius1     <- diameter/2
+areaCircle1 <- pi*radius1^2
+
+# Area of the arena with half the radius
+radius2 <- radius1/2
+areaCircle2 <- pi*radius2^2
+
+areaCentre <- areaCircle2
+areaPeriphery <- areaCircle1 - areaCircle2
+
+# Temp bind centre and start locations
+tempBind <- rbind(centre, data.frame(x = trialOrder$start_x, z = trialOrder$start_z))
+
+# Calculate distances
+distances <- as.matrix(dist(tempBind))[1, 2:nrow(tempBind)]
+
+# Create & assign centrality value
+trialOrder$start_centrality <- ifelse(distances >= radius1/2, 'perihery', 'central')
+```
+
+# Create the .csv file
+```{r mainTask_csv_file}
+# Adding to one DF
+mainTask <- data.frame(trial_num = trialOrder$trial_num,
+                       block_num = trialOrder$block_num,
+                       targets = trialOrder$targets,
+                       targetNames= trialOrder$targetNames,
+                       start_x = trialOrder$start_x,
+                       start_z = trialOrder$start_z,
+                       object_x = trialOrder$x,
+                       object_z = trialOrder$z,
+                       cue = trialOrder$cuePeriod,
+                       delay = trialOrder$delayPeriods,
+                       ITI = trialOrder$ITIPeriods,
+                       trialType = trialOrder$trialType,
+                       speedForward = speedForward,
+                       rotationSpeed = rotationSpeed,
+                       start_centrality = trialOrder$start_centrality,
+                       perfectAngle = trialOrder$perfectAngle,
+                       messageToDisplay = -1)
+
+# Sample start locations from uniform distribution
+mainTask$start_yRotation <- runif(n = nrow(mainTask), min = 0, max = 360)
+
+# Add a messages after the runs 
+mainTask[(numberPerObject*numObjects), 'messageToDisplay']  <- 0 # Before retrieval/control 1
+mainTask[(numberPerObject*numObjects)+(numberPerObject*numObjects)*2, 'messageToDisplay']  <- 1 # Before encoding 2
+mainTask[(numberPerObject*numObjects)+(numberPerObject*numObjects)*2+(numberPerObject*numObjects), 'messageToDisplay'] <- 0 # Before retrieval/control 2
+
+# Write .csv file
+write.csv(x = mainTask, file = 'inputFiles/2_OLM_fMRI/mainTask_fMRI_version1_session2.csv', quote = FALSE, row.names = FALSE)
+```

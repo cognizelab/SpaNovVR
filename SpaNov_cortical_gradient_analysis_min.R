@@ -32,38 +32,35 @@ library(plyr)
 # Load the ciftiTools package and point to the Connectome Workbench 
 library(ciftiTools)
 
-# Use correct location based on computers
+# Load ciftiTools and set workbench paths
+possible_wb_paths <- c("/usr/bin/wb_command", "/home1/Jaquent/Toolboxes/workbench/bin_rh_linux64/")
+load_ciftiTools(possible_wb_paths)
+
+# Use correct locations and other settings based on computer
 if(Sys.info()[4] == "DESKTOP-335I26I"){
-  # Work laptop
-  ciftiTools.setOption("wb_path", "C:/Program Files/workbench-windows64-v1.5.0/workbench/bin_windows64")
-  path2imaging_results <- "D:/Seafile/imaging_results" # Work laptop
+  # Work laptop (Windows)
+  path2imaging_results2 <- "D:/Seafile/imaging_results"
 } else if(Sys.info()[4] == 'DESKTOP-91CQCSQ') {
-  ciftiTools.setOption("wb_path", "D:/workbench/bin_windows64")
-  path2imaging_results <- "D:/imaging_results" # Work desktop computer
+  # Work desktop (Windows)
+  path2imaging_results2 <- "D:/imaging_results"
 } else if(Sys.info()[4] == 'alex-Zenbook-UX3404VA-UX3404VA') {
-  ciftiTools.setOption("wb_path", "/usr/bin/wb_command")
-  path2imaging_results <- "/media/alex/shared/Seafile/imaging_results" # Work laptop but ubuntu
+  # Work laptop (Linux)
+  path2imaging_results2 <- "/media/alex/shared/Seafile/imaging_results"
 } else if(Sys.info()[4] == "greengoblin"){
   # Main desktop PC (Linux)
-  ciftiTools.setOption("wb_path", "/usr/bin/wb_command") 
-  path2imaging_results <- "/media/alex/work/Seafile/imaging_results" 
+  path2imaging_results2 <- "/media/alex/work/Seafile/imaging_results" 
 } else if(Sys.info()[4] == "GREEN-GOBLIN-WI"){
   # Main desktop PC (Linux)
-  ciftiTools.setOption("wb_path", "C:/Program Files/workbench/bin_windows64")
-  path2imaging_results <- "E:/Seafile/imaging_results" 
+  path2imaging_results2 <- "E:/Seafile/imaging_results" 
 } else {
   # Personal laptop (Windows)
-  ## Setting paths to workbench installation
-  ciftiTools.setOption("wb_path", "D:/Program Files/workbench/bin_windows64")
-  
-  ## Path to the imaging data
-  path2imaging_results <- "D:/OLM/imaging_results"
+  path2imaging_results2 <- "D:/OLM/imaging_results"
 }
 
 # Loading the cifti files etc.
 surfLeft  <- "data/ignore_fMRI_version1/sourceFiles/S1200.L.inflated_MSMAll.32k_fs_LR.surf.gii"
 surfRight <- "data/ignore_fMRI_version1/sourceFiles/S1200.R.inflated_MSMAll.32k_fs_LR.surf.gii"
-load("cifti_results/SpaNovGradient_against_avg.RData")
+load("cifti_results/SpaNovGradient_against_avg_cue-delay.RData")
 
 # Choose which map
 grad_xifti <-  against_avg$grad_min_xii
@@ -341,7 +338,7 @@ cluster_xifti$meta$cifti$labels$`vertex areas` <- new_key_colours
 # */
 # Write CIFTI
 write_cifti(xifti = cluster_xifti, 
-            cifti_fname = "cifti_results/SpaNovGradient_against_avg_min_clusters.dlabel.nii")
+            cifti_fname = "cifti_results/SpaNovGradient_against_avg_min_clusters_cue-delay.dlabel.nii")
 
 # /*
 # ----------------------------- Find gradient function ---------------------------
@@ -597,7 +594,7 @@ for(i in 1:nrow(cluster_df_R)){
 # ----------------------------- Save results ---------------------------
 # */
 # Create .RData image
-save.image("intermediate_data/SpaNov_cortical_gradient_analysis_min.RData")
+save.image("intermediate_data/SpaNov_cortical_gradient_analysis_min_cue-delay.RData")
 
 write_cifti(xifti = seed_clusters, 
-            cifti_fname = "cifti_results/SpaNovGradient_against_avg_min_seed_clusters.dlabel.nii")
+            cifti_fname = "cifti_results/SpaNovGradient_against_avg_min_seed_clusters_cue-delay.dlabel.nii")

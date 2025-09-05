@@ -9,16 +9,15 @@
 library(assortedRFunctions)
 library(plyr)
 library(stringr)
-library(ciftiTools)
 library(foreach)
 library(doParallel)
 
-# Paths
-wb_path <- '/home1/Jaquent/Toolboxes/workbench/bin_rh_linux64/'
-ciftiTools.setOption('wb_path', wb_path)
+# Load ciftiTools and set workbench paths
+possible_wb_paths <- c("/usr/bin/wb_command", "/home1/Jaquent/Toolboxes/workbench/bin_rh_linux64/")
+load_ciftiTools(possible_wb_paths)
 
 # Job parameters
-output_fileName <- "results/HC_2_cortex_FRSC_SpaNov_gradient.RData"
+output_fileName <- "results/HC_2_cortex_FRSC_SpaNov_gradient_cue-delay.RData"
 input_fileName  <- "data/HC_2_cortex_FRSC_XXXXX.RData"
 job_name        <- "SpaNov_gradient"
 pattern         <- "XXXXX" # Replace this with the correct subject R-number.
@@ -42,8 +41,8 @@ subjects_num     <- length(sub2analyse)
 
 # Load the CIFTI files and prepare for the analysis
 ## Load the CIFTI files
-PMC_gradient         <- read_cifti("gradient_maps/SpaNov_gradient_PMC_min.dlabel.nii", brainstructures = "all")
-whole_brain_gradient <- read_cifti("gradient_maps/SpaNov_gradient_wholebrain_min.dlabel.nii", brainstructures = "all")
+PMC_gradient         <- read_cifti("gradient_maps/SpaNov_gradient_PMC_min_cue-delay.dlabel.nii", brainstructures = "all")
+whole_brain_gradient <- read_cifti("gradient_maps/SpaNov_gradient_wholebrain_min_cue-delay.dlabel.nii", brainstructures = "all")
 
 ## Prepare vector with labels
 gradient_level_cortex <- get_all_points_from_xifti(PMC_gradient) # left, right & subcortical
@@ -109,6 +108,6 @@ HC_2_cortex_SpaNov_gradient <- foreach(subj = 1:subjects_num, .packages = c("str
 }
 
 # /* 
-# ----------------------------- Load subject connectivity matrices and aggregate based on the novelty levels ---------------------------
+# ----------------------------- Save results ---------------------------
 # */
 save(HC_2_cortex_SpaNov_gradient, file = output_fileName)

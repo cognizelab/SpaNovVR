@@ -1,0 +1,276 @@
+---
+title: "Notebook for event file creation"
+author: "Joern Alexander Quent"
+date: "Analysis date: `r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# General notes
+At the moment, this script only supports data where all trials are completed. 
+
+# Libraries used
+```{r libraries}
+# Install via devtools:install_github("JAQuent/assortedRFunctions", upgrade = "never")
+library(assortedRFunctions) 
+library(plyr)
+library(ggplot2)
+library(stringr)
+library(cowplot)
+library(foreach)
+library(doParallel)
+```
+
+<details>
+ <summary>Click here for detailed session information. </summary>
+```{r session_info}
+sessioninfo::session_info()
+```
+</details>
+
+# Data preparation
+<details>
+<summary>Click here for code for data preparation. </summary>
+```{r subject_info_and_path}
+# Path 2 where the data is saved
+path2data        <- "data/ignore_fMRI_version1/"
+lookupTable      <- read.csv(paste0(path2data, "lookUpTable.csv"))
+```
+
+```{r load_mainTask_data_7T}
+# Current task folder
+taskFolder <- paste0(path2data, "OLM_grassy/")
+
+# Load the subject IDs for this analysis
+subjIDs    <- list.files(taskFolder)
+
+# Now check which of these already completed the 7T scan
+completed7T <- c()
+for(i in 1:length(subjIDs)){
+  completed7T[i] <- any(list.files(paste0(taskFolder, subjIDs[i])) == "S007")
+}
+
+# Subset to those who completed
+subjIDs <- subjIDs[completed7T]
+
+# Create list of all files and load them
+allFiles   <- paste0(taskFolder, subjIDs, '/S007/trial_results.csv')
+trial_results <- do.call(rbind, lapply(allFiles, read.csv, quote = ""))
+
+# Remove rows with NA values
+#trial_results <- na.omit(trial_results)
+trial_results <- trial_results[!is.na(trial_results$runStartTime),]
+
+# Relabel ppid to subject to be compatible
+trial_results$subject <- trial_results$ppid
+
+# Only retrieval
+trial_results_retrieval <- trial_results[trial_results$trialType == "retrieval", ]
+
+# Get cue times
+cues_agg <- data.frame(ppid = trial_results$ppid,
+                       trial = trial_results$trial_num,
+                       start = trial_results$start_time,
+                       end = trial_results$start_time + trial_results$cue,
+                       duration = trial_results$cue,
+                       runStartTime = trial_results$runStartTime,
+                       block_num = trial_results$block_num)
+# Get delay times
+delays_agg <- data.frame(ppid = trial_results$ppid,
+                         trial = trial_results$trial_num,
+                         start = trial_results$start_time + trial_results$cue,
+                         end = trial_results$start_time + trial_results$cue + trial_results$delay,
+                         duration = trial_results$delay,
+                         runStartTime = trial_results$runStartTime,
+                         block_num = trial_results$block_num)
+```
+
+```{r load_positionData}
+# Current task folder
+taskFolder <- paste0(path2data, "OLM_grassy/")
+
+# Load the subject IDs for this analysis
+subjIDs    <- list.files(taskFolder)
+
+# Now check which of these already completed the 7T scan
+completed7T <- c()
+for(i in 1:length(subjIDs)){
+  completed7T[i] <- any(list.files(paste0(taskFolder, subjIDs[i])) == "S007")
+}
+
+# Subset to those who completed
+subjIDs <- subjIDs[completed7T]
+```
+
+</details>
+
+## Folder & file naming convention
+
+<details>
+ <summary>Code to create file & folder names </summary>
+```{r file_folder_names}
+# String parts
+task <- "OLM"
+
+# Other information
+folder    <- "event_tables/"
+session   <- "S007"
+runs      <- c(1, 1, 2, 2) # OlMe run1, OLMr run 1, OLMe run 2 etc.
+runType   <- c("e", "r", "e", "r")
+
+# Create folders for this subject and for the session
+ses <- 1 #as.numeric(gsub("[^0-9.-]", "", session))
+
+# Memory encoding
+OLMe_7T_encoding_folder1 <- paste0(folder, 'OLMe_7T_encoding1/', "sub-", subjIDs, "/ses-", sprintf("%02d", ses), "/") 
+for(subj in 1:length(subjIDs)){
+  dir.create(OLMe_7T_encoding_folder1[subj], recursive = TRUE, showWarnings = FALSE)
+}
+```
+</details>
+
+# Memory encoding
+Traditional studies of memory often back sort items as a function of whether the memoranda were remembered or forgotten. This not straightforward in our task, however what we can do is to rank the objects based on the average placement error for each subject and then model encoding success as ordered regressors for the 1st, 2nd etc. object. 
+
+Cope 1 = Rank 1: Smallest placement error
+...
+Cope 6 = Rank 6: Highest placement error
+
+Cope 7 + the linear contrast with Rank 1 > ... > Rank 6
+
+```{r prepare_object_rank}
+# Calculate the average placement error for each object & subject. 
+obj_avg <- ddply(trial_results_retrieval, c("subject", "objectName"), summarise,
+                 euclideanDistance = mean(euclideanDistance), N = length(subject))
+
+# Rank the objects within each subject
+obj_avg <- ddply(obj_avg, c("subject"), mutate, rank = order(euclideanDistance))
+obj_avg$f_rank <- factor(obj_avg$rank)
+
+# Visualise results
+ggplot(obj_avg, aes(x = objectName, y = rank, fill = objectName)) + 
+  geom_jitter(width = 0.25, height = 0, pch = 21) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.5) +
+  stat_summary(geom = "point", fun = "mean", col = 'white', size = 3, shape = 24, aes(fill = objectName),
+               position = position_dodge(width =  0.75),
+               key_glyph = "rect") +
+  labs(title = "Rank by object",
+       x = "", y = "Within-subject rank")  +
+  theme_classic() +
+  theme(legend.position = 'none',
+        plot.title = element_text(hjust = 0.5))
+
+ggplot(obj_avg, aes(x = f_rank, y = euclideanDistance, fill = f_rank)) + 
+  geom_jitter(width = 0.25, height = 0, pch = 21) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.8) +
+  stat_summary(geom = "point", fun = "mean", col = 'white', size = 3, shape = 24, aes(fill = f_rank),
+               position = position_dodge(width =  0.75),
+               key_glyph = "rect") +
+  labs(title = "Placement error by rank",
+       x = "Rank", y = "Avg. placement error (vm)")  +
+  theme_classic() +
+  scale_fill_viridis_d() +
+  theme(legend.position = 'none',
+        plot.title = element_text(hjust = 0.5))
+```
+
+The ranking of the objects looks relative uniform so there should be no problem sorting each encoding trial based on the this rank. Regressor will model the whole trial apart from the cue & delay period. The nice thing about this model is that each participant (regardless of their average performance) will have the same number of events (3 trials per run) in all conditions. Rank 1 to 6 will be modelled via this contrast: `r 6:1 - mean(1:6)`
+
+```{r encoding_success_EVs}
+# Specify runs
+runs_encoding  <- c(1, 2) # OlMe run1, OLMe run 2
+
+# Loop through all subjects
+for(subj in 1:length(subjIDs)){
+  # The easiest way to create the condition labels for fMRI analysis seems to be to loop 
+  # through each trial and then create and event for each step.
+  # Create empty DF where new events will be added to. 
+  encodingEvents <- data.frame(matrix(ncol = 6, nrow = 0))
+  
+  # Change the column names so new rows can be added using rbind()
+  colnames(encodingEvents) <- c('block_num', 'eventType', 'onset', 'duration', 'weight', "runStartTime")
+  
+  # Get the encoding data from only the current subject
+  sub_main_results <- trial_results[trial_results$subject == subjIDs[subj] & 
+                                      trial_results$trialType == "encoding", ]
+  
+  # Loop through each row of the sub_main_results data frame and create the events for the 
+  # memory analysis one by one. 
+  for(rowID in 1:nrow(sub_main_results)){
+    # Check which rank the current object is for the current subject
+    currentSubject <- sub_main_results$subject[rowID]
+    currentObject  <- sub_main_results$objectName[rowID]
+    currentRank    <- obj_avg[obj_avg$subject == currentSubject & 
+                              obj_avg$objectName == currentObject, 'rank']
+    
+    # Add event for this row from navigation start until the end of the trial
+    duration <- sub_main_results$end_time[rowID] - sub_main_results$navStartTime[rowID]
+    encodingEvents <- rbind(encodingEvents, data.frame(block_num = sub_main_results$block_num[rowID],
+                                       eventType = currentRank,
+                                       onset = sub_main_results$navStartTime[rowID],
+                                       duration = duration,
+                                       weight = 1,
+                                       runStartTime = sub_main_results$runStartTime[rowID]))
+    
+  }
+  
+  # Using the created encodingEvents data frame to generate event tables
+  for(run in 1:length_uniq(encodingEvents$block_num)){
+    tempDF <- encodingEvents[encodingEvents$block_num == unique(encodingEvents$block_num)[run], ]
+    block_num           <- unique(tempDF$block_num) 
+    tempDF$block_num    <- NULL
+    tempDF$onset        <- tempDF$onset - tempDF$runStartTime[1]
+    tempDF$runStartTime <- NULL
+    
+    # One-file-per-condition style
+    # Create the following folder structure sub-R0132>ses-07>run-01>EVs>cue_retrieval.txt
+    # cue_retrieval.txt would have the following columns onset, duration & weight (always 1) separated by tab.
+    # Create folder for this run 
+    currentFolder <- paste0(OLMe_7T_encoding_folder1[subj], "run-", sprintf("%02d", runs_encoding[run]), "/EVs/")
+    dir.create(currentFolder, recursive = TRUE, showWarnings = FALSE)
+    
+    # Look for different event types
+    tempEventType  <- unique(tempDF$eventType)
+    numEventsTypes <- length(tempEventType)
+    # Loop through all unique event types
+    # cue_retrieval.txt would have the following columns onset, duration & weight (always 1) separated by tab.
+    for(event in 1:numEventsTypes){
+      # Get the subset of exactly that event type
+      tempDF2 <- tempDF[tempDF$eventType == tempEventType[event],]
+      
+      # Remove first column
+      tempDF2$eventType <- NULL
+      
+      # Write to .txt file
+      fileName <- paste0("rank_", tempEventType[event], ".txt")
+      fileName <- str_replace_all(fileName, " ", "_") # Remove the space to make things easier in unix. 
+      write.table(tempDF2, 
+                file = paste0(currentFolder, fileName),
+                col.names = FALSE, 
+                row.names = FALSE,
+                quote =  FALSE,
+                sep = '\t')
+    }
+    
+    # Write event files for cue and delay
+    ## Cue
+    cue_sub <- cues_agg[cues_agg$ppid == subjIDs[subj] & cues_agg$block_num == block_num, ]
+    tempDF  <- data.frame(onset = cue_sub$start - cue_sub$runStartTime,
+                         duration = cue_sub$duration, weight = 1)
+    write.table(tempDF, 
+                file = paste0(currentFolder, "cue.txt"),
+                col.names = FALSE, row.names = FALSE, quote =  FALSE, sep = '\t')
+    
+    ## Delay
+    delay_sub <- delays_agg[delays_agg$ppid == subjIDs[subj] & delays_agg$block_num == block_num, ]
+    tempDF    <- data.frame(onset = delay_sub$start - delay_sub$runStartTime,
+                         duration = delay_sub$duration, weight = 1)
+    write.table(tempDF, 
+                file = paste0(currentFolder, "delay.txt"),
+                col.names = FALSE, row.names = FALSE, quote =  FALSE, sep = '\t')
+  } 
+}
+```

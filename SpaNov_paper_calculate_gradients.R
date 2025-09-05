@@ -5,46 +5,31 @@
 # ----------------------------- Libraries ---------------------------
 # */
 # Libraries
-library(ciftiTools)
+library(assortedRFunctions)
+library(viridisLite)
+
+# Load ciftiTools and set workbench paths
+possible_wb_paths <- c("/usr/bin/wb_command", "/home1/Jaquent/Toolboxes/workbench/bin_rh_linux64/")
+load_ciftiTools(possible_wb_paths)
 
 # Use correct locations and other settings based on computer
 if(Sys.info()[4] == "DESKTOP-335I26I"){
   # Work laptop (Windows)
-  ## Setting paths to workbench installation
-  ciftiTools.setOption("wb_path", "C:/Program Files/workbench-windows64-v1.5.0/workbench/bin_windows64")
-  
-  ## Path to the imaging data
   path2imaging_results2 <- "D:/Seafile/imaging_results"
-  
 } else if(Sys.info()[4] == 'DESKTOP-91CQCSQ') {
   # Work desktop (Windows)
-  ## Setting paths to workbench installation
-  ciftiTools.setOption("wb_path", "D:/workbench/bin_windows64")
-  
-  ## Path to the imaging data
   path2imaging_results2 <- "D:/imaging_results"
 } else if(Sys.info()[4] == 'alex-Zenbook-UX3404VA-UX3404VA') {
   # Work laptop (Linux)
-  ## Setting paths to workbench installation
-  ciftiTools.setOption("wb_path", "/usr/bin/wb_command")
-  
-  ## Path to the imaging data
   path2imaging_results2 <- "/media/alex/shared/Seafile/imaging_results"
-  
 } else if(Sys.info()[4] == "greengoblin"){
   # Main desktop PC (Linux)
-  ciftiTools.setOption("wb_path", "/usr/bin/wb_command") 
   path2imaging_results2 <- "/media/alex/work/Seafile/imaging_results" 
 } else if(Sys.info()[4] == "GREEN-GOBLIN-WI"){
   # Main desktop PC (Linux)
-  ciftiTools.setOption("wb_path", "C:/Program Files/workbench/bin_windows64")
   path2imaging_results2 <- "E:/Seafile/imaging_results" 
 } else {
   # Personal laptop (Windows)
-  ## Setting paths to workbench installation
-  ciftiTools.setOption("wb_path", "D:/Program Files/workbench/bin_windows64")
-  
-  ## Path to the imaging data
   path2imaging_results2 <- "D:/OLM/imaging_results"
 }
 
@@ -484,57 +469,12 @@ get_HC_data_from_xii <- function(currentxii){
   return(HC_data)
 }
 
-bootstrap_analysis <- function(data, lm_formula, ddply_factors, nIter, colName, imageName){
-  # Initialise results list
-  results <- list()
-  
-  # Select correct column for analysis and create new data frame
-  data$val     <- data[, colName]
-  data2shuffle <- data
-  
-  # Calculate empirical values and save to list
-  results$lm <- lm(lm_formula, data = data)
-  numCoef    <- length(results$lm$coefficients) - 1 # Ignoring the intercept
-  
-  # Start cluster
-  my.cluster <- parallel::makeCluster(detectCores() - 2, type = "PSOCK")
-  
-  #register it to be used by %dopar%
-  doParallel::registerDoParallel(cl = my.cluster)
-  
-  # Run parallel loop
-  bootstrapped_values <- foreach(i = 1:nIter, .combine = 'c', .packages = 'plyr') %dopar% {
-    data2shuffle$val <- sample(data$val)
-    data2shuffle_agg <- ddply(data2shuffle, ddply_factors, summarise, val = mean(val))
-    
-    # Fit model
-    temp_lm <- lm(lm_formula, data = data2shuffle_agg)
-    
-    # Add values 
-    temp_est <- as.data.frame(matrix(as.numeric(temp_lm$coefficients)[-1], ncol = numCoef))
-    names(temp_est) <- names(results$lm$coefficients)[-1]
-    list(temp_est)
-  }
-  
-  # Stop cluster again
-  parallel::stopCluster(cl = my.cluster) 
-  
-  # Add to results
-  results$bootstrapped_values <- as.data.frame(rbindlist(bootstrapped_values))
-  
-  # Save to disk  
-  save(results, file = paste0("intermediate_data/", imageName))
-  
-  # Return value
-  return(results)
-}
-
 # /* 
 # ----------------------------- Calculate the gradients ---------------------------
 # */
 # Input for gradient analysis
 conN       <- 6
-folderName <- "SpaNov/OLMe_7T_SpaNov_gradient_6lvl_smo2_MSMAll"
+folderName <- "SpaNov/OLMe_7T_SpaNov_gradient_6lvl_cue-delay_smo2_MSMAll"
 copeNums   <- 8:13 # Because the copes are actually reversed relative to the 4 level version
 fileName   <- "/stats/vwc/results_lvl2cope1_dat_ztstat_c1.dscalar.nii"
 novLabels  <- paste0('lvl', 1:conN)
@@ -542,7 +482,7 @@ novFam_gradient      <- viridis(n = 6, option = "H", direction = -1)
 
 # Load template file
 # Folder where the images are
-ciftiFolder <- "/SpaNov/OLMe_7T_SpaNov_gradient_6lvl_smo4_MSMAll/cope7.feat/stats/vwc/"
+ciftiFolder <- "/SpaNov/OLMe_7T_SpaNov_gradient_6lvl_cue-delay_smo2_MSMAll/cope7.feat/stats/vwc/"
 
 # Choose the files
 zMap_file        <- paste0(path2imaging_results2, ciftiFolder, "results_lvl2cope1_dat_ztstat_c1.dscalar.nii")
@@ -556,56 +496,57 @@ GLM1_zMap_xii <- read_cifti(zMap_file, brainstructures = "all",
 against_avg  <- create_gradient_xiis(conN, folderName, copeNums, fileName, novLabels, "zstat", novFam_gradient)
 against_avg2 <- create_gaussian_gradient_xiis(conN, folderName, copeNums, fileName, novLabels, "zstat", novFam_gradient)
 
-
 # /* 
 # ----------------------------- Write CIFTI files (wholebrain) ---------------------------
 # */
 # Write to disk as cifti
-write_cifti(against_avg$grad_min_xii, cifti_fname = "cifti_results/SpaNov_gradient_wholebrain_min.dlabel.nii",
+write_cifti(against_avg$grad_min_xii, cifti_fname = "cifti_results/SpaNov_gradient_wholebrain_min_cue-delay.dlabel.nii",
             surfL_fname = surfLeft,
             surfR_fname = surfRight,
             verbose = FALSE)
-write_cifti(against_avg$grad_max_xii, cifti_fname = "cifti_results/SpaNov_gradient_wholebrain_max.dlabel.nii",
+write_cifti(against_avg$grad_max_xii, cifti_fname = "cifti_results/SpaNov_gradient_wholebrain_max_cue-delay.dlabel.nii",
             surfL_fname = surfLeft,
             surfR_fname = surfRight,
             verbose = FALSE)
 
 # Write to disk as .RData
-save(against_avg, file = "cifti_results/SpaNovGradient_against_avg.RData")
-save(against_avg2, file = "cifti_results/SpaNovGradient_against_avg_Gaussian.RData")
+save(against_avg, file = "cifti_results/SpaNovGradient_against_avg_cue-delay.RData")
+save(against_avg2, file = "cifti_results/SpaNovGradient_against_avg_Gaussian_cue-delay.RData")
+
+# /* 
+# ----------------------------- Extract & save hippocampal gradient ---------------------------
+# */
+# Get the hippocampal data
+HC_data <- get_HC_data_from_xii(against_avg)
+
+# Save
+save(HC_data, file = "intermediate_data/SpaNov_gradient_data_cue-delay.RData")
 
 # /* 
 # ----------------------------- Write CIFTI files (PMC) ---------------------------
 # */
+# First run SpaNov_cortical_gradient_analysis_min.R
 # Minimum
 ## Load the file
-load("intermediate_data/SpaNov_cortical_gradient_analysis_min.RData")
-
-## Write the L & R to disk
-cifti_fname <- "cifti_results/SpaNovGradient_min_L_1.dlabel.nii"
-write_cifti(xifti = gradient_xiftis_L[[1]], cifti_fname = cifti_fname)
-
-cifti_fname <- "cifti_results/SpaNovGradient_min_R_1.dlabel.nii"
-write_cifti(xifti = gradient_xiftis_R[[1]], cifti_fname = cifti_fname)
+load("intermediate_data/SpaNov_cortical_gradient_analysis_min_cue-delay.RData")
 
 # Code to investigate other gradient
-# for(i in 1:67){
+# for(i in 1:88){
 #   # Print i
-#   print(i)
-#   view_cifti_surface(gradient_xiftis_R[[i]])
-#   
-#   # Wait for user input
-#   readline(prompt="Press [enter] to continue")
+#   view_cifti_surface(gradient_xiftis_R[[i]], fname = paste0("temp/Gradient_R_", sprintf("%02d", i), ".png"), 
+#                      title  = paste("Gradient R", sprintf("%02d", i)), width = 1300,
+#                      legend_fname = paste0("temp/legends/Gradient_R_", sprintf("%02d", i), ".png"),
+#                      legend_embed = FALSE)
 # }
 
 # Combine both to one CIFTI
-new_grad_xii <- gradient_xiftis_R[[1]]
+new_grad_xii <- gradient_xiftis_R[[2]]
 new_grad_xii$data$cortex_left <-  gradient_xiftis_L[[1]]$data$cortex_left
 
-# We also want to add all vertices that are zero in Grad 1 but not 
-# zero in Grad 25 to be replaced
-bool_index <- new_grad_xii$data$cortex_right == 0 & gradient_xiftis_R[[34]]$data$cortex_right != 0
-new_grad_xii$data$cortex_right[bool_index] <- gradient_xiftis_R[[34]]$data$cortex_right[bool_index]
+# We also want to add all vertices that are zero in R Grad 2 but not 
+# zero in R Grad 49 to be replaced
+bool_index <- new_grad_xii$data$cortex_right == 0 & gradient_xiftis_R[[49]]$data$cortex_right != 0
+new_grad_xii$data$cortex_right[bool_index] <- gradient_xiftis_R[[49]]$data$cortex_right[bool_index]
 
 # Now we will cut-off all unnecessary regions that are clearly not part of the 
 # gradients. Especially the ones on the lateral surface of the brain
@@ -631,14 +572,6 @@ bool_index <- MMP_xii$data$cortex_right %in% (MMP_IDs)
 new_grad_xii$data$cortex_right[!bool_index] <- 0
 
 # Write new file
-cifti_fname <- "cifti_results/SpaNov_gradient_PMC_min.dlabel.nii"
+cifti_fname <- "cifti_results/SpaNov_gradient_PMC_min_cue-delay.dlabel.nii"
 write_cifti(xifti = new_grad_xii, cifti_fname = cifti_fname)
 
-# /* 
-# ----------------------------- Extract & save hippocampal gradient ---------------------------
-# */
-# Get the hippocampal data
-HC_data <- get_HC_data_from_xii(against_avg)
-
-# Save
-save(HC_data, file = "intermediate_data/SpaNov_gradient_data.RData")
