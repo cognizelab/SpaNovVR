@@ -1,0 +1,23 @@
+cff-version: 1.1.0
+message: "If you use this code, please cite it as below."
+authors:
+- family-names: Quent
+  given-names: Jörn Alexander
+  orcid: https://orcid.org/0000-0002-1800-5219
+- family-names: Song
+  given-names: Liangyue
+- family-names: Liang
+  given-names: Xinyu
+  orcid: https://orcid.org/0000-0001-6132-3354
+- family-names: Su
+  given-names: Yueting
+- family-names: Yu
+  given-names: Wenwen
+- family-names: Wang
+  given-names: He
+- family-names: Vatansever
+  given-names: Deniz
+  orcid: https://orcid.org/0000-0002-2494-9945
+title: Graded encoding of spatial novelty scales in the human brain
+version: v1
+date-released: 2025-10-30
