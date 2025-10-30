@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/943706256.svg)](https://zenodo.org/badge/latestdoi/943706256)
+
 # Repository for Graded encoding of spatial novelty scales in the human brain
 Authors: Jörn Alexander Quent, Liangyue Song, Xinyu Liang, Yueting Su, Wenwen Yu, He Wang and Deniz Vatansever
 
