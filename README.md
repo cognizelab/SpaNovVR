@@ -1,9 +1,15 @@
 # Repository for Graded encoding of spatial novelty scales in the human brain
-Collaborators: Liangyue Song, Yueting Su, Wenwen Yu, He Wang, Xinyu Liang, Deniz Vatansever
+Authors: Jörn Alexander Quent, Liangyue Song, Xinyu Liang, Yueting Su, Wenwen Yu, He Wang and Deniz Vatansever
 
-Status: submitted
+To be published in Nature Communications
 
 This repository contains the code for our manuscript investigating gradients of spatial novelty and familiarity in the human hippocampus and beyond.
+
+## Abstract
+Successful navigation relies on the ability to process and encode detailed information about our dynamic environments. Beyond familiarity, emerging studies now highlight the crucial role of novelty detection in this process, the precise neural mechanism of which remains poorly understood. Using ultra-high field 7T fMRI, we investigated how the human brain encodes spatial novelty during virtual navigation, with a particular focus on graded representations that follow systematic transitions between novel and familiar spaces. Our results revealed novelty and familiarity specific neural responses within the posterior and anterior poles of the bilateral hippocampus, respectively. On the cortical surface, two separable streams of activity patterns were observed in which regions within the visual and frontoparietal networks showed novelty-specific activity, while somatomotor, ventral attention and default mode regions preferred spatial familiarity. Importantly, we identified a distinct gradient along the hippocampal long axis and demonstrated the extended contribution of the posterior medial cortex to the encoding of spatial novelty scales that were intrinsically coupled with the hippocampal gradient. These findings advance our understanding of how the human brain encodes and processes spatial information, suggesting that graded representations of spatial novelty may serve as a fundamental organizational principle for spatial cognition in the human brain. 
+
+## Keywords
+Spatial novelty, hippocampus, gradients, virtual navigation, posterior medial cortex, 7T fMRI
 
 ## Additional resources
 - [OLM](https://github.com/JAQuent/Object-Location-Memory-Task) the source code & builds to the Object Location Memory task used for this study. Note that we used **Version 2.1.1** of this task for the data collection.
@@ -35,14 +41,14 @@ Here is a detailed guide to the code & files:
 - ***get_noveltyGradient_slope.R*** script to calculate hippocampal gradient for each participant separately.
 - ***OLMe_7T_encoding1_cue-delay_smo4_MSMAll_HCP.sh*** &  ***SOLMe_7T_encoding1_cue-delay_smo4_MSMAll_PALM.sh*** the script to run the HCP-style task fMRI analysis using a QuNex container and the script to run the corresponding the PALM analysis. This version, which received further smoothing (4 mm), was used to the GLM analyses for encoding success.
 - ***SpaNov_cortical_gradient_analysis_min.R*** scripts to run the depth-first algorithm on the cortical gradient maps.
-- ***SpaNov_event_file_creation_encoding.Rmd*** & ***SpaNov_event_file_creation_encoding.html*** the script to create the event files for the encoding success analysis.
-- ***SpaNov_event_file_creation_gradient.Rmd*** & ***SpaNov_event_file_creation_gradient.html*** the script to create the event files for the spatial novelty analysis.
-- ***SpaNov_event_file_creation_gradient_dist2centre.Rmd*** & ***SpaNov_event_file_creation_gradient_dist2centre.html*** the script to create the event files for the spatial novelty analysis, where each events' novelty score is corrected for centrality.
+- ***SpaNov_event_file_creation_encoding.Rmd*** (+ .html) the script to create the event files for the encoding success analysis.
+- ***SpaNov_event_file_creation_gradient.Rmd*** (+ .html) the script to create the event files for the spatial novelty analysis.
+- ***SpaNov_event_file_creation_gradient_dist2centre.Rmd*** (+ .html) the script to create the event files for the spatial novelty analysis, where each events' novelty score is corrected for centrality.
 - ***SpaNov_gradient_6lvl_cue-delay_smo2_MSMAll_HCP.sh*** &  ***SpaNov_gradient_6lvl_cue-delay_smo2_MSMAll_PALM.sh*** the script to run the HCP-style task fMRI analysis using a QuNex container and the script to run the corresponding the PALM analysis. This version, which did not receive further smoothing (2 mm), was used to the gradient analyses for spatial novelty.
 - ***SpaNov_gradient_6lvl_cue-delay_smo4_MSMAll_HCP.sh*** &  ***SpaNov_gradient_6lvl_cue-delay_smo4_MSMAll_PALM.sh*** the script to run the HCP-style task fMRI analysis using a QuNex container and the script to run the corresponding the PALM analysis. This version, which received further smoothing (4 mm), was used to the GLM analysesfor spatial novelty.
 - ***SpaNov_gradient_dist2centre-corrected_6lvl_smo4_MSMAll_HCP.sh*** &  ***SpaNov_gradient_dist2centre-corrected_6lvl_smo4_MSMAll_PALM.sh*** the script to run the HCP-style task fMRI analysis using a QuNex container and the script to run the corresponding the PALM analysis. This version, which received further smoothing (4 mm), was used to the GLM analysesfor spatial novelty, where each events' novelty score is corrected for centrality.
 - ***SpaNov_paper_calculate_gradients.R*** script to create the gradient maps.
-- ***SpaNov_results.Rmd*** & ***SpaNov_results.html*** the main script for the analyses.
+- ***SpaNov_results.Rmd*** (+ .html) the main script for the analyses.
 - ***spin_test_script.py*** & ***spin_test.sh*** scripts to run the spin test to compare the cortical maps.
 
 Example usage of `pValueMap2clusters.sh`:

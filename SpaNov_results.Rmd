@@ -18,7 +18,8 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ```{r load_libs}
 # Libraries
 library(ggplot2)
-library(assortedRFunctions)
+# install via devtools:::install_github("JAQquent/assortedRFunctions", upgrade = "never")
+library(assortedRFunctions) 
 library(cowplot) 
 library(stringr)
 library(plyr)
@@ -31,11 +32,8 @@ library(viridis)
 library(tidybayes)
 library(bayesplot)
 library(brms)
-#library(lmerTest)
 library(data.table)
 library(knitr)
-#library(caTools) 
-#library(e1071) 
 library(readxl)
 library(ggridges)
 library(ggforce)
@@ -94,7 +92,7 @@ sessioninfo::session_info()
  <summary>Click here for chunk for figure and other reporting parameters. </summary>
 ```{r figure_and_report_params}
 # Significance cut off 
-cutOff <- 1.301 # Because of -log(0.05, 10)
+cutOff <- 1.301 # equals -log(0.05, 10)
 
 # Parameters how to report means
 report_type   <- 1
@@ -130,14 +128,13 @@ theme_journal <- function(base_size = 7, linewidth = 0.35, theme_name = "classic
   
   # Base them plus customisation
   base_theme +
-    theme(
-      text = element_text(color = "black", size = base_size),
-      axis.text = element_text(size = base_size * 0.9),  # 90% of base
-      axis.line = element_line(linewidth = linewidth),
-      axis.ticks = element_line(linewidth = linewidth),
-      legend.text = element_text(size = base_size * 0.9), # 90% of base
-      legend.key.size = unit(0.5, "lines"),
-      plot.title = element_text(hjust = 0.5, size = base_size))
+    theme(text = element_text(color = "black", size = base_size),
+          axis.text = element_text(size = base_size * 0.9),  # 90% of base
+          axis.line = element_line(linewidth = linewidth),
+          axis.ticks = element_line(linewidth = linewidth),
+          legend.text = element_text(size = base_size * 0.9), # 90% of base
+          legend.key.size = unit(0.5, "lines"),
+          plot.title = element_text(hjust = 0.5, size = base_size))
 }
 
 # Updating geom's defaults
@@ -855,9 +852,17 @@ part1 <- plot_grid(total_path_lengths_plot, event_duration_plot,
 part2 <- plot_grid(NULL, novelty_score_model_plot)
 Figure1_combined <- plot_grid(part1, NULL, part2, align = "v", nrow = 3, rel_heights = c(1, 0.2, 1))
 
-# Save
+# Save as .png
 ggsave(Figure1_combined,
        filename = paste0(figurePath, "Fig_1_lower_part.png"), 
+       dpi = 1000,
+       width = 170,
+       height = 90,
+       units = "mm")
+
+# Save as .svg
+ggsave(Figure1_combined,
+       filename = paste0(figurePath, "Fig_1_lower_part.svg"), 
        dpi = 1000,
        width = 170,
        height = 90,
@@ -1666,8 +1671,12 @@ individual_slopes_plot <- ggplot(individual_slope_df, aes(x = Effect, y = Coeffi
 ## Combine both plots
 p <- plot_grid(scatter_min, individual_slopes_plot, ncol = 1, align = "hv", axis = "tblr")
 
-## Save
-ggsave(p, filename = paste0(figurePath, "Fig_2c_scatter.png"),
+## Save as .png
+ggsave(p, filename = paste0(figurePath, "Fig_2c_scattter_and_boxplot.png"),
+       dpi = dpi,  width = 99, height = 83.5, units = "mm")
+
+## Save as .svg
+ggsave(p, filename = paste0(figurePath, "Fig_2c_scattter_and_boxplot.svg"),
        dpi = dpi,  width = 99, height = 83.5, units = "mm")
 ```
 
@@ -1746,8 +1755,17 @@ p1 <- ggplot(Yeo_zValues_df_sub, aes(x = zValue, y = net_label, fill = net_label
   theme(legend.position = "none", plot.margin = unit(c(1,1,1,1), "mm")) +
   labs(x = "z-statistic", y = "")
 
+# Save as .png
 ggsave(p1,
        filename = paste0(figurePath, "Fig_3a_Yeo7_ridge.png"), 
+       dpi = dpi,
+       width = 60,
+       height = 30,
+       units = "mm")
+
+# Save as .svg
+ggsave(p1,
+       filename = paste0(figurePath, "Fig_3a_Yeo7_ridge.svg"), 
        dpi = dpi,
        width = 60,
        height = 30,
@@ -1944,9 +1962,17 @@ p1_mae_draws <- ggplot(mae_response_draws, aes(x = draw)) +
   theme(plot.title = element_text(hjust = 0.5),
         plot.subtitle = element_text(hjust = 0.5)) 
 
-# Save 
+# Save as .png
 ggsave(plot_grid(p1_mae_draws, pred_means_subject_draws_p, align = "h"),
        filename = paste0(figurePath, "Fig_4_FRSC.png"), 
+       dpi = dpi,
+       width = 90,
+       height = 45,
+       units = "mm")
+
+# Save as .svg
+ggsave(plot_grid(p1_mae_draws, pred_means_subject_draws_p, align = "h"),
+       filename = paste0(figurePath, "Fig_4_FRSC.svg"), 
        dpi = dpi,
        width = 90,
        height = 45,
@@ -2822,7 +2848,7 @@ ggsave(p,
 - Encoding effect in familiarity regions: d = `r d1`, `r str1`, BF10 = `r BF10_1`
 - Encoding effect in novelty regions: d = `r d2`, `r str2`, BF10 = `r BF10_2`
 
-### Spatial novelty gradient in posterior medial cortex showed different principal functional connectivity manifold profiles
+### Distribution of principal functional connectivity gradient scores across spatial novelty preference levels in the posterior medial cortex
 ```{r PMC_Margulies}
 # Compare the PMC gradient with the first connectivity gradient from Margulies et al. (2016)
 ## Load PMC gradient
