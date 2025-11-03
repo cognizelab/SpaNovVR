@@ -530,16 +530,16 @@ for(i in 1:nrow(sector_average)){
 temp_data <- sector_average[,-3]
 
 # Write .csv file
-write.csv(x = temp_data, file = "other_stuff/source_data_files/blenderData_avg_visits.csv", 
+write.csv(x = temp_data, file = "other_stuff/source_data_files/Fig_1d_1.csv", 
           quote = FALSE, row.names = FALSE)
 
-# Prepare data for 3D plot for the average number of visits per persons to each sector
+# Prepare data for 3D plot for the average time between visits to each sector
 ## Remove NA values & remove wrong column
 temp_data <- na.omit(sector_average)
 temp_data <- temp_data[,-2]
 
 # Write .csv file
-write.csv(x = temp_data, file = "other_stuff/source_data_files/blenderData_avg_time_since_last_visit.csv", 
+write.csv(x = temp_data, file = "other_stuff/source_data_files/Fig_1d_2.csv", 
           quote = FALSE, row.names = FALSE)
 
 # Colours
@@ -581,8 +581,12 @@ path_lenghts <- ddply(pathData, c("ppid", "trial"),
 total_path_lengths <- ddply(path_lenghts, c("ppid"), 
                             summarise, distance = sum(distance))
 
+# Create data 2 save
+data2save      <- total_path_lengths
+data2save$ppid <- NULL
+
 # Write .csv file
-write.csv(x = total_path_lengths, file = "other_stuff/source_data_files/total_path_lengths.csv", 
+write.csv(x = data2save, file = "other_stuff/source_data_files/Fig_1c_1_path-lengths.csv", 
           quote = FALSE, row.names = FALSE)
 
 # Create a box plot 
@@ -644,8 +648,11 @@ event_df$lvl_num <- as.numeric(str_extract(event_df$lvl, "[0-9]+"))
 # Change run label
 event_df$run <- ifelse(event_df$run == "run-01", "Run 1", "Run 2")
 
+# Create data to save
+data2save <- data.frame(duration = event_df$duration)
+
 # Write .csv file
-write.csv(x = event_df, file = "other_stuff/source_data_files/event_duration.csv", 
+write.csv(x = data2save, file = "other_stuff/source_data_files/Fig_1c_2_event-duration.csv", 
           quote = FALSE, row.names = FALSE)
 
 # Create a box plot 
@@ -683,11 +690,10 @@ calc_rayleigh_test_FUN <- function(angles){
 
 # Apply test to all sectors
 sector_rayleigh <- ddply(no_control, c("sector"), summarise,
-                         resultant_length = calc_rayleigh_test_FUN(rot_y)[1],
-                         p.value = calc_rayleigh_test_FUN(rot_y)[2])
+                         resultant_length = calc_rayleigh_test_FUN(rot_y)[1])
 
 # Write .csv file
-write.csv(x = sector_rayleigh, file = "other_stuff/source_data_files/sector_rayleigh.csv", 
+write.csv(x = sector_rayleigh, file = "other_stuff/source_data_files/Fig_1c_3_rayleigh.csv", 
           quote = FALSE, row.names = FALSE)
 
 sector_rayleigh_plot <- ggplot(sector_rayleigh, aes(x = resultant_length)) +
@@ -771,8 +777,12 @@ locomotion_per_long  <- reshape2::melt(locomotion_per, id.vars = c("ppid"))
 # Convert proportions to percentage
 locomotion_per_long$value <- locomotion_per_long$value * 100
 
+# Create data frame to save
+data2save      <- locomotion_per
+data2save$ppid <- NULL
+
 # Write .csv
-write.csv(x = locomotion_per_long, file = "other_stuff/source_data_files/locomotion_per_long.csv", 
+write.csv(x = data2save, file = "other_stuff/source_data_files/Fig_1c_4_locomotion.csv", 
           quote = FALSE, row.names = FALSE)
 
 # Plot showing percentage of locomotion
@@ -814,6 +824,12 @@ pred2_df <- as.data.frame(pred2_df)
 # Calculate the minimum for each subject, which is used for colouring
 pred1_df <- ddply(pred1_df, c("subject"), mutate, min = min(estimate))
 pred2_df <- ddply(pred2_df, c("subject"), mutate, min = min(estimate))
+
+# Write .csv file for source data
+write.csv(x = pred1_df, file = "other_stuff/source_data_files/Fig_1d_3_run1.csv", 
+          quote = FALSE, row.names = FALSE)
+write.csv(x = pred2_df, file = "other_stuff/source_data_files/Fig_1d_4_run2.csv", 
+          quote = FALSE, row.names = FALSE)
 
 # Create plots
 ## Run 1
@@ -1625,8 +1641,12 @@ HC_data_plotting <- HC_data_agg_pos
 HC_data_plotting$Hemisphere2 <- ifelse(HC_data_plotting$Hemisphere == "right",
                                        "Right hippocampus", "Left hippocampus")
 
-# Write ,csv file
-write.csv(x = HC_data_plotting, file = "other_stuff/source_data_files/HC_scatter_plot.csv", 
+# Create data to save
+data2save     <- HC_data_plotting
+data2save$max <- NULL
+
+# Write .csv file for source data
+write.csv(x = HC_data_plotting, file = "other_stuff/source_data_files/Fig_2c_1_scatter.csv", 
           quote = FALSE, row.names = FALSE)
 
 # Create Figure 2
@@ -1653,7 +1673,7 @@ individual_slope_df <- data.frame(Effect = rep(c("Right hippocampus", "Left hipp
                                                   gradient_subject_slopes_hemisphere))
 
 # Write ,csv file
-write.csv(x = individual_slope_df, file = "other_stuff/source_data_files/HC_individual_slopes.csv", 
+write.csv(x = individual_slope_df, file = "other_stuff/source_data_files/Fig_2c_2_boxplot.csv", 
           quote = FALSE, row.names = FALSE)
 
 ### Create plot
@@ -1929,6 +1949,17 @@ subject_ordered <- pred_means_subject$subject[order(pred_means_subject$estimate,
 pred_means_subject_draws$f_subject <- factor(pred_means_subject_draws$subject,
                                                  levels = subject_ordered, ordered = TRUE)
 
+# Create data to save
+data2save <- ddply(pred_means_subject_draws, c("subject"), summarise, 
+                   lb = quantile(-draw, prob = 0.025),
+                   median = median(-draw),
+                   ub = quantile(-draw, prob = 0.975))
+data2save$subject <- NULL
+
+# Write for source data
+write.csv(x = data2save, file = "other_stuff/source_data_files/Fig_4c.csv", 
+          quote = FALSE, row.names = FALSE)
+
 # Plot
 # Width: a vector of probabilities to use that determine the widths of the resulting intervals 
 # Here that to 95%
@@ -1952,6 +1983,16 @@ mae_response_draws <-  get_draws(mae1_respone)
 
 ## Flipping sign because it makes more sense
 mae_response_draws$draw <- -mae_response_draws$draw
+
+# Manually calculating density so we can share aggregate data because 50,000
+# samples is too much
+density_calc   <- density(mae_response_draws$draw , bw = "nrd0")
+manual_density <- data.frame(x = density_calc$x, y = density_calc$y, 
+                             scaled = density_calc$y / max(density_calc$y))
+
+# Write for source data
+write.csv(x = manual_density, file = "other_stuff/source_data_files/Fig_4b.csv", 
+          quote = FALSE, row.names = FALSE)
 
 ## Create plot
 p1_mae_draws <- ggplot(mae_response_draws, aes(x = draw)) +
@@ -2120,7 +2161,7 @@ kable(GLM1_cluster2$cluster_labels)
 </details>
 
 ## Supplementary figures
-### Learning curves
+### Figure S1 | Spatial learning during encoding
 ```{r learning_curve, eval = FALSE}
 # Creating these figures takes too long so eval = FALSE
 load("fitted_brms_models/SpaNov_m_navTime.Rdata")
@@ -2155,6 +2196,16 @@ mae1_navTime_respone <- avg_comparisons(m, variables = voi, type = "response", r
 # Get posterior draws
 mae1_navTime_respone_draws <-  get_draws(mae1_navTime_respone)
 
+# Manually calculating density so we can share aggregate data because 50,000
+# samples is too much
+density_calc   <- density(mae1_navTime_respone_draws$draw , bw = "nrd0")
+manual_density <- data.frame(x = density_calc$x, y = density_calc$y, 
+                             scaled = density_calc$y / max(density_calc$y))
+
+# Write for source data
+write.csv(x = manual_density, file = "other_stuff/source_data_files/Fig_S01a.csv", 
+          quote = FALSE, row.names = FALSE)
+
 p1_mae_draws <- ggplot(mae1_navTime_respone_draws, aes(x = draw)) +
   geom_vline(xintercept = 0, linetype = "dashed") + 
   stat_halfeye(fill = base_col[1], point_size = 1.5) +
@@ -2185,6 +2236,10 @@ pred_line_subject_navTime <- as.data.frame(pred_line_subject_navTime)
 pred_line_navTime1         <- pred_line_navTime
 pred_actual_navTime1       <- pred_actual_navTime
 pred_line_subject_navTime1 <- pred_line_subject_navTime
+
+# Write for source data
+write.csv(x = pred_line_subject_navTime1, file = "other_stuff/source_data_files/Fig_S01b.csv", 
+          quote = FALSE, row.names = FALSE)
 
 # Assemble plot
 p1_line <-ggplot() +
@@ -2225,7 +2280,7 @@ str1 <- create_str_from_avg_comparisons(mae1_navTime_respone, "seconds")
 
 - Average marginal effect: `str 1`
 
-### Locomotion by novelty
+### Figure S2 | Differences in locomotion in novel versus familiar parts of the environment
 ```{r locomotion}
 # Load the image from the gradient event file creation
 load("event_tables/images/SpaNov_event_file_gradients.RData")
@@ -2251,6 +2306,22 @@ ev_info_agg1 <- ddply(ev_info, c("subj", "run"), summarise,
 
 # Remove middle levels
 ev_info_agg <- ev_info_agg[ev_info_agg$level == "lvl1" | ev_info_agg$level == "lvl6", ]
+
+# Create data write
+data2save1        <- reshape2::dcast(ev_info_agg, subj ~ level, value.var = c("mean_per_tra_arc"))
+data2save1$subj   <- NULL
+names(data2save1) <- paste0("translation_",names(data2save1))
+data2save2        <- reshape2::dcast(ev_info_agg, subj ~ level, value.var = c("mean_per_rot_arc"))
+data2save2$subj   <- NULL
+names(data2save2) <- paste0("rotation_",names(data2save2))
+data2save3        <- reshape2::dcast(ev_info_agg, subj ~ level, value.var = c("mean_per_sta_arc"))
+data2save3$subj   <- NULL
+names(data2save3) <- paste0("stationary_",names(data2save3))
+data2save         <- cbind(data2save1, data2save2, data2save3)
+
+# Write for source data
+write.csv(x = data2save, file = "other_stuff/source_data_files/Fig_S02.csv", 
+          quote = FALSE, row.names = FALSE)
 
 # Create the plots
 ## Translation
@@ -2334,7 +2405,7 @@ d3       <- signif(mean(diff_val)/sd(diff_val), digits1)
 
 ![](figures/SpaNov/Fig_S02_locomotion.png)
 
-### Spatial distribution of novelty scores
+### Figure S3 | Distribution of high spatial novelty events across areal partitions of the environment
 ```{r novelty_spatial_distribution}
 # Circle definitions
 ## Area of the arena
@@ -2365,6 +2436,14 @@ event_info_df <- as.data.frame(event_info_df)
 event_info_df_lvl1 <- event_info_df[event_info_df$noveltyScore_gradientLevel == "lvl1" & 
                                     !is.na(event_info_df$noveltyScore_gradientLevel), ]
 event_info_df_lvl1 <- event_info_df_lvl1[event_info_df_lvl1$run %in% c(1, 3), ]
+
+# Create data to save
+data2save <- data.frame(pos_x = event_info_df_lvl1$pos_x,
+                        pos_z = event_info_df_lvl1$pos_z)
+
+# Write for source data
+write.csv(x = data2save, file = "other_stuff/source_data_files/Fig_S03.csv", 
+          quote = FALSE, row.names = FALSE)
 
 spa_nov_dist <- ggplot() +
   # Circles
@@ -2412,7 +2491,7 @@ avg_level_centrality <- ddply(event_info_df_encoding, c("noveltyScore_gradientLe
 
 ![](figures/SpaNov/Fig_S03_spa_nov_dist.png)
 
-### Minimal influence of centrality on spatial novelty effects
+### Figure S4 | Influence of centrality on spatial novelty effects.
 ```{r control_for_centrality}
 # Loading files
 dist2centre_file <- "/media/alex/work/Seafile/imaging_results/SpaNov/OLMe_7T_SpaNov_gradient_dist2centre-corrected_6lvl_smo4_MSMAll/cope7.feat/stats/vwc/results_lvl2cope1_dat_ztstat_c1.dscalar.nii"
@@ -2420,7 +2499,7 @@ SpaNov1_file     <- "/media/alex/work/Seafile/imaging_results/SpaNov/OLMe_7T_Spa
 dist2centre_xii  <- read_cifti(dist2centre_file)
 SpaNov1_xii      <- read_cifti(SpaNov1_file)
 
-# 
+# Create data frame
 df <- data.frame(dist2centre = as.matrix(dist2centre_xii),
                  SpaNov1 = as.matrix(SpaNov1_xii))
 
@@ -2472,12 +2551,11 @@ p <- plot_grid(p_map_corr, NULL, NULL,
                nrow = 1, labels = "auto", label_size = 10, align = "hv")
 
 # Combine plots
-ggsave(p,
-       filename = paste0(figurePath, "Fig_S04_control_for_centrality.png"), 
+ggsave(p, filename = paste0(figurePath, "Fig_S04_control_for_centrality.png"), 
        dpi = dpi, width = 180, height = 57, units = "mm")
 ```
 
-### Individual differences in centrality do not predict spatial novelty
+### Figure S5 | Association between individual differences in preference for the centre and spatial novelty effects
 ```{r individual_differences}
 ## Calculate average centrality
 str1 <- mean_SD_str2(avg_centrality$score1, report_type, digits1, rounding_type)
@@ -2499,6 +2577,16 @@ avg_centrality_plot <- ggplot(avg_centrality, aes(x = score1)) +
 ## Add beta values to data frame
 avg_centrality$WB_novelty     <- WB_novelty_values
 avg_centrality$WB_familiarity <- WB_familiarity_values
+
+# Create data to save
+data2save      <- avg_centrality
+data2save$ppid <- NULL
+data2save$subject <- NULL
+names(data2save)[1] <- "centrality_score"
+
+# Write for source data
+write.csv(x = data2save, file = "other_stuff/source_data_files/Fig_S05.csv", 
+          quote = FALSE, row.names = FALSE)
 
 ## Calculate correlations
 r1     <- round(cor(avg_centrality$score1, avg_centrality$WB_novelty), 2)
@@ -2576,7 +2664,7 @@ low_5_p <- head(sort(compare_p_dist$p_values[compare_p_dist$dist_type == "Only c
 
 The five lowest p-values are `r low_5_p`.
 
-### Hippocampal gradient based on maximum statistic
+### Figure S6 | Hippocampal gradient based on maximum z-statistic
 ```{r HC_grad_max}
 # Create supplemental figure for maximum stat
 ## Creating a new data frame for combined plotting
@@ -2591,6 +2679,11 @@ HC_supp_fig_data$Hemisphere2 <- factor(HC_supp_fig_data$Hemisphere2,
                                        levels =  c("Left hippocampus", "Right hippocampus",
                                                    "Average"),
                                        ordered = TRUE)
+
+# Write for source data
+write.csv(x = HC_supp_fig_data, file = "other_stuff/source_data_files/Fig_S06.csv", 
+          quote = FALSE, row.names = FALSE)
+
 ## Create plot
 scatter_max <- ggplot(HC_supp_fig_data, aes(x = -position, y = max)) + 
   facet_grid(~Hemisphere2, scales = "free_x") + 
@@ -2609,7 +2702,7 @@ ggsave(scatter_max, filename = paste0(figurePath, "Fig_S06_max_scatter.png"),
        dpi = dpi,  width = 120, height = 40, units = "mm")
 ```
 
-### Hippocampal gradient without averaging
+### Figure S7 | Hippocampal gradient without the assumption of medial to lateral homogeneity
 ```{r HC_grad_no-avg_models}
 # Create new copy of HC_data and create check sum
 HC_data_no_avg <- HC_data
@@ -2711,6 +2804,14 @@ kable(tab_df)
 HC_data$Hemisphere2 <- ifelse(HC_data$Hemisphere == "right",
                               "Right hippocampus", "Left hippocampus")
 
+# Create data to save
+data2save     <- HC_data
+data2save$max <- NULL
+
+# Write for source data
+write.csv(x = data2save, file = "other_stuff/source_data_files/Fig_S07.csv", 
+          quote = FALSE, row.names = FALSE)
+
 # Create plots
 scatter_min_no_avg <- ggplot(HC_data, aes(x = -position, y = min)) + 
   facet_grid(~Hemisphere2, scales = "free_x") + 
@@ -2729,7 +2830,7 @@ ggsave(scatter_min_no_avg, filename = paste0(figurePath, "Fig_S07_scatter_no-avg
        dpi = dpi,  width = 80, height = 40, units = "mm")
 ```
 
-### Relationship between spatial memory and successful memory encoding
+### Figure S8 | Association of spatial novelty and memory
 ```{r successful_memory_encoding}
 # Calculate the average placement error for each object & subject. 
 obj_avg <- ddply(OLM_7T_retrieval, c("subject", "objectName"), summarise,
@@ -2739,6 +2840,10 @@ obj_avg <- ddply(OLM_7T_retrieval, c("subject", "objectName"), summarise,
 # Rank the objects within each subject
 obj_avg <- ddply(obj_avg, c("subject"), mutate, rank = order(euclideanDistance))
 obj_avg$f_rank <- factor(obj_avg$rank)
+
+# Write for source data
+write.csv(x = obj_avg, file = "other_stuff/source_data_files/Fig_S08a-c.csv", 
+          quote = FALSE, row.names = FALSE)
 
 # Visualise results
 p1 <- ggplot(obj_avg, aes(x = objectName, y = rank, fill = objectName)) + 
@@ -2814,6 +2919,10 @@ BF10_2 <- reportBF(ttestBF(x))
 encoding_WB_df <- data.frame(mask = rep(c("Familiarity", "Novelty"), each = length(encoding_WB_familiarity)),
                              contrast = c(encoding_WB_familiarity, encoding_WB_novelty))
 
+# Write for source data
+write.csv(x = encoding_WB_df, file = "other_stuff/source_data_files/Fig_S08e.csv", 
+          quote = FALSE, row.names = FALSE)
+
 p4 <- ggplot(encoding_WB_df, aes(x = mask, y = contrast, fill = mask)) + 
   geom_hline(yintercept = 0, linetype = "dashed") +
   geom_jitter(width = 0.25, height = 0, pch = 21) +
@@ -2848,7 +2957,7 @@ ggsave(p,
 - Encoding effect in familiarity regions: d = `r d1`, `r str1`, BF10 = `r BF10_1`
 - Encoding effect in novelty regions: d = `r d2`, `r str2`, BF10 = `r BF10_2`
 
-### Distribution of principal functional connectivity gradient scores across spatial novelty preference levels in the posterior medial cortex
+### Figure S9 | Distribution of principal functional connectivity gradient scores across spatial novelty preference levels in the posterior medial cortex
 ```{r PMC_Margulies}
 # Compare the PMC gradient with the first connectivity gradient from Margulies et al. (2016)
 ## Load PMC gradient
@@ -2866,6 +2975,10 @@ Margulies_grad_PMC$PMC_gradient <- factor(Margulies_grad_PMC$PMC_gradient, level
 ## Remove Level5 because there are only 3 vertices
 Margulies_grad_PMC <- Margulies_grad_PMC[Margulies_grad_PMC$PMC_gradient != 5, ]
 
+# Write for source data
+write.csv(x = Margulies_grad_PMC, file = "other_stuff/source_data_files/Fig_S09.csv", 
+          quote = FALSE, row.names = FALSE)
+
 ## Create a figure
 Margulies_novelty <- ggplot(Margulies_grad_PMC, aes(x = PMC_gradient, y = Grad_1, fill = PMC_gradient)) +
   geom_jitter(height = 0, size = 0.5, alpha = 0.1, width = 0.2) +
@@ -2875,7 +2988,7 @@ Margulies_novelty <- ggplot(Margulies_grad_PMC, aes(x = PMC_gradient, y = Grad_1
   scale_fill_manual(values = novFam_gradient[-5]) +
   theme_journal() + 
   theme(legend.position = "none") +
-  labs(x = "Spatial novelty-familarity gradient (PMC)", y = TeX(r"( $Margulies'\ et\ al^{10}\ 1^{st}\ gradient$ )"))
+  labs(x = "Spatial novelty-familarity gradient (PMC)", y = TeX(r"( $Margulies'\ et\ al^{2}\ 1^{st}\ gradient$ )"))
 
 # Save
 ggsave(Margulies_novelty,
@@ -2886,7 +2999,7 @@ ggsave(Margulies_novelty,
        units = "mm")
 ```
 
-### Hippocampal connectivity patterns correlating with Margulies gradient
+### Figure S10 | Cortico-hippocampal connectivity patterns and principal functional connectivity gradients
 ```{r HC_connectivity_and_Margulies}
 # Load results
 load("data/ignore_fMRI_version1/grad_FRSC/HC_2_cortex_FRSC_Margulies_gradient.RData")
@@ -2927,6 +3040,14 @@ annot_df <- data.frame(label = paste("BF10 =", BF10),
                        Gradient = factor(1:10),
                        y = rep(c(0.09, 0.08), 5))
 
+# Convert to wide data frame
+data2save      <- reshape2::dcast(HC_2_Margulies_agg2, Rnum ~ Gradient, value.var = c("diff"))
+data2save$Rnum <- NULL
+
+# Write for source data
+write.csv(x = data2save, file = "other_stuff/source_data_files/Fig_S10.csv", 
+          quote = FALSE, row.names = FALSE)
+
 # Visualise
 HC_2_margulies <- ggplot(HC_2_Margulies_agg2, aes(x = Gradient, y = diff, fill = Gradient)) +
   geom_hline(yintercept = 0, linetype = "dashed", colour = "darkgrey") +
@@ -2949,7 +3070,7 @@ ggsave(HC_2_margulies,
        units = "mm")
 ```
 
-### Posterior predictive checks for the novelty score model
+### Figure S11 | Posterior predictive checks for hierarchical models
 Find information here: https://mc-stan.org/rstanarm/reference/pp_check.stanreg.html
 
 ```{r ppc}
@@ -3058,13 +3179,24 @@ ggsave(p_comb,
        units = "mm")
 ```
 
-### Distribuion of starting relative to object locations
+### Figure S12 | Distribution of starting locations relative to object locations
 ```{r distribution_of_starting_locations}
 # Use one participant for visualisation because they are all the same anyway
 start_vis_data <- OLM_7T_encoding[OLM_7T_encoding$subject == unique(OLM_7T_encoding$subject)[1], ]
 
 # Remove the gift box that location was variable
 no_gift <- obj_locations[obj_locations$objectName != "gift", ]
+
+# Create data frame to save
+data2save <- data.frame(start_x = start_vis_data$start_x,
+                        start_z = start_vis_data$start_z,
+                        object_x = start_vis_data$object_x,
+                        object_z = start_vis_data$object_z,
+                        targetNames = start_vis_data$targetNames)
+
+# Write for source data
+write.csv(x = data2save, file = "other_stuff/source_data_files/Fig_S12.csv", 
+          quote = FALSE, row.names = FALSE)
 
 # Create the plot
 start_locations <- ggplot() +
@@ -3092,7 +3224,7 @@ ggsave(start_locations,
        dpi = dpi, width = 80, height = 80, units = "mm")
 ```
 
-### Correlation between novelty measures
+### Figure S13 | Relationship between the number of visits and the time elapsed since last visit to a given sector
 ```{r corr_novelty_measures}
 ###############################################################################_
 # Number of visits
@@ -3113,6 +3245,12 @@ pred2_df <- as.data.frame(pred2_df)
 # Calculate the minimum for each subject, which is used for colouring
 pred1_df <- ddply(pred1_df, c("subject"), mutate, min = min(estimate))
 pred2_df <- ddply(pred2_df, c("subject"), mutate, min = min(estimate))
+
+# Write for source data
+write.csv(x = pred1_df, file = "other_stuff/source_data_files/Fig_S13b_1_run1.csv", 
+          quote = FALSE, row.names = FALSE)
+write.csv(x = pred2_df, file = "other_stuff/source_data_files/Fig_S13b_2_run2.csv", 
+          quote = FALSE, row.names = FALSE)
 
 # Create plots
 ## Run 1
@@ -3222,6 +3360,12 @@ pred2_df <- as.data.frame(pred2_df)
 pred1_df <- ddply(pred1_df, c("subject"), mutate, min = min(estimate))
 pred2_df <- ddply(pred2_df, c("subject"), mutate, min = min(estimate))
 
+# Write for source data
+write.csv(x = pred1_df, file = "other_stuff/source_data_files/Fig_S13c_1_run1.csv", 
+          quote = FALSE, row.names = FALSE)
+write.csv(x = pred2_df, file = "other_stuff/source_data_files/Fig_S13c_2_run2.csv", 
+          quote = FALSE, row.names = FALSE)
+
 # Create plots
 ## Run 1
 p2_1 <- ggplot(data = pred1_df, aes(x = s_onset_rel, y = estimate, group = subject, colour = min)) +
@@ -3249,6 +3393,14 @@ p2_2 <- ggplot(data = pred2_df, aes(x = s_onset_rel, y = estimate, group = subje
 # Calculate correlation
 temp_corr <- cor.test(event_info_df_encoding$visits, event_info_df_encoding$lastVisit)
 plot_str  <- paste("r", rValue(temp_corr$estimate), "p", pValue(temp_corr$p.value))
+
+# Create data to save
+data2save <- data.frame(number_of_visits = event_info_df_encoding$visits,
+                        time_elapsed = event_info_df_encoding$lastVisit)
+
+# Write for source data
+write.csv(x = data2save, file = "other_stuff/source_data_files/Fig_S13a.csv", 
+          quote = FALSE, row.names = FALSE)
 
 # Create scatter plot
 corr_novelty_measures <- ggplot(event_info_df_encoding, aes(x = visits, y = lastVisit)) +
